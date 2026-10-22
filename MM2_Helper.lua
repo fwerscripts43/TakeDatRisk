@@ -1,4 +1,4 @@
--- MM2 Helper v3.2 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.3 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -157,6 +157,75 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
+-- LOADING SCREEN: blur + loading bar (bottom-right) + caption, removed once the window is ready
+local loadingFinish
+do
+    local blur = Instance.new("BlurEffect")
+    blur.Size = 0
+    blur.Parent = game:GetService("Lighting")
+    TweenService:Create(blur, TweenInfo.new(0.4), { Size = 18 }):Play()
+
+    local lg = Instance.new("ScreenGui")
+    lg.Name = "MM2Hub_Loading"
+    lg.ResetOnSpawn = false
+    lg.DisplayOrder = 100
+    lg.IgnoreGuiInset = true
+    lg.Parent = playerGui
+
+    local barBack = Instance.new("Frame")
+    barBack.Size = UDim2.new(0, 220, 0, 10)
+    barBack.AnchorPoint = Vector2.new(1, 1)
+    barBack.Position = UDim2.new(1, -20, 1, -60)
+    barBack.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    barBack.BorderSizePixel = 0
+    barBack.Parent = lg
+    corner(barBack, 5)
+
+    local barFill = Instance.new("Frame")
+    barFill.Size = UDim2.new(0, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(255, 60, 100)
+    barFill.BorderSizePixel = 0
+    barFill.Parent = barBack
+    corner(barFill, 5)
+
+    local caption = Instance.new("TextLabel")
+    caption.Size = UDim2.new(0, 220, 0, 22)
+    caption.AnchorPoint = Vector2.new(1, 0)
+    caption.Position = UDim2.new(1, -20, 1, -44)
+    caption.BackgroundTransparency = 1
+    caption.Text = "its cool, zurq"
+    caption.TextColor3 = COLOR_TEXT
+    caption.TextScaled = true
+    caption.Font = Enum.Font.GothamBold
+    caption.Parent = lg
+
+    local LOAD_TIME = 2.5
+    local progress, startT = 0, os.clock()
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        progress = math.min(1, (os.clock() - startT) / LOAD_TIME)
+        barFill.Size = UDim2.new(progress, 0, 1, 0)
+    end)
+
+    -- called at the end of the script: waits for the bar, then unblurs and shows the window
+    loadingFinish = function(showMain)
+        task.spawn(function()
+            while progress < 1 do
+                task.wait(0.05)
+            end
+            conn:Disconnect()
+            TweenService:Create(caption, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+            TweenService:Create(barBack, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(barFill, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+            TweenService:Create(blur, TweenInfo.new(0.5), { Size = 0 }):Play()
+            task.wait(0.5)
+            lg:Destroy()
+            blur:Destroy()
+            showMain()
+        end)
+    end
+end
+
 local rgbBorder = Instance.new("Frame")
 rgbBorder.Size = UDim2.new(0, 316, 0, 478)
 rgbBorder.Position = UDim2.new(0.5, -158, 0.2, -8)
@@ -167,6 +236,12 @@ rgbBorder.Draggable = true
 rgbBorder.ZIndex = 1
 rgbBorder.Parent = screenGui
 corner(rgbBorder, 13)
+rgbBorder.Visible = false -- shown when the loading screen finishes
+
+-- window scale: changed by the corner grips, animated by ANIMATED UI
+local uiScale = Instance.new("UIScale")
+uiScale.Scale = math.clamp(tonumber(settings.uiScale) or 1, 0.6, 1.6)
+uiScale.Parent = rgbBorder
 
 local rgbGrad = Instance.new("UIGradient")
 rgbGrad.Parent = rgbBorder
@@ -240,7 +315,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.2"
+versionBadge.Text = "v3.3"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -410,9 +485,13 @@ local function makeButton(parent, text, yPos, bgColor)
     end)
     btn.MouseButton1Down:Connect(function()
         TweenService:Create(container, TweenInfo.new(0.06), { BackgroundColor3 = bgColor }):Play()
+        if settings.animatedUI then
+            TweenService:Create(stroke, TweenInfo.new(0.06), { Thickness = 3.5 }):Play()
+        end
     end)
     btn.MouseButton1Up:Connect(function()
         TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(24, 24, 36) }):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.15), { Thickness = 1.5 }):Play()
     end)
 
     return btn, stroke
@@ -889,6 +968,18 @@ local function aimFire(pos)
     local gun = aimEquipGun()
     if not gun then return end
 
+    -- the gun's Shoot remote (as GunClient uses it): origin CFrame + target CFrame
+    local shoot = gun:FindFirstChild("Shoot")
+    if shoot and shoot:IsA("RemoteEvent") then
+        local char = player.Character
+        local hrpNow = char and char:FindFirstChild("HumanoidRootPart")
+        local att = hrpNow and hrpNow:FindFirstChild("GunRaycastAttachment")
+        pcall(function()
+            shoot:FireServer(att and att.WorldCFrame or nil, CFrame.new(pos))
+        end)
+        return
+    end
+
     local remote = gun:FindFirstChild("KnifeLocal")
         and gun.KnifeLocal:FindFirstChild("CreateBeam")
         and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
@@ -1355,6 +1446,119 @@ reachBtn.MouseButton1Click:Connect(function()
         setStatus("MURDER REACH OFF")
     end
 end)
+
+-- RESIZE: drag a corner grip to scale the whole window; ANIMATED UI breathes and spins the border
+do
+    local resizing = false
+    local center0, d0, s0 = nil, 1, 1
+
+    local function makeGrip(ax, ay)
+        local g = Instance.new("TextButton")
+        g.Size = UDim2.new(0, 14, 0, 14)
+        g.Position = UDim2.new(ax, -7, ay, -7)
+        g.BackgroundColor3 = activeThemeDef.accent
+        g.BorderSizePixel = 0
+        g.AutoButtonColor = false
+        g.Text = ""
+        g.ZIndex = 20
+        g.Parent = rgbBorder
+        corner(g, 7)
+        g.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            resizing = true
+            rgbBorder.Draggable = false
+            center0 = rgbBorder.AbsolutePosition + rgbBorder.AbsoluteSize / 2
+            d0 = math.max(1, (UserInputService:GetMouseLocation() - center0).Magnitude)
+            s0 = uiScale.Scale
+        end)
+    end
+    makeGrip(0, 0)
+    makeGrip(1, 0)
+    makeGrip(0, 1)
+    makeGrip(1, 1)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not resizing then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        local d = (UserInputService:GetMouseLocation() - center0).Magnitude
+        local s = math.clamp(s0 * d / d0, 0.6, 1.6)
+        settings.uiScale = s
+        uiScale.Scale = s
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if not resizing then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        resizing = false
+        rgbBorder.Draggable = true
+        saveSettings()
+    end)
+
+    local t0 = os.clock()
+    RunService.Heartbeat:Connect(function()
+        if resizing then return end
+        local base = settings.uiScale or 1
+        if settings.animatedUI then
+            local t = os.clock() - t0
+            uiScale.Scale = base * (1 + 0.015 * math.sin(t * 2.5))
+            rgbGrad.Rotation = (t * 40) % 360
+        else
+            uiScale.Scale = base
+        end
+    end)
+end
+
+-- SHERIFF HITBOX EXPANDER: makes the murderer's hitbox bigger on your client.
+-- (The server decides hits, so the gun's own beam hitbox can't be changed from here.)
+do
+    local HITBOX = 14
+    local on = false
+    local originals = setmetatable({}, { __mode = "k" }) -- HRP -> original values
+
+    local hbBtn, hbStroke = makeButton(combatPage, "🎯 SHERIFF HITBOX EXPANDER", 250, COLOR_RED)
+
+    local function restoreAll()
+        for hrp, o in pairs(originals) do
+            if hrp.Parent then
+                hrp.Size = o.size
+                hrp.CanCollide = o.canCollide
+            end
+            originals[hrp] = nil
+        end
+    end
+
+    local acc = 0
+    RunService.Heartbeat:Connect(function(dt)
+        if not on then return end
+        acc = acc + dt
+        if acc < 0.5 then return end
+        acc = 0
+        restoreAll()
+        local m = findMurderer()
+        local hrp = m and m.Character and m.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            originals[hrp] = { size = hrp.Size, canCollide = hrp.CanCollide }
+            hrp.Size = Vector3.new(HITBOX, HITBOX, HITBOX)
+            hrp.CanCollide = false
+        end
+    end)
+
+    hbBtn.MouseButton1Click:Connect(function()
+        on = not on
+        setToggleVisual(hbStroke, on)
+        if on then
+            setStatus("🎯 Sheriff hitbox expander ON", COLOR_RED)
+        else
+            restoreAll()
+            setStatus("Sheriff hitbox expander OFF")
+        end
+    end)
+end
 
 do -- MURDER REACH SIZE POPUP (right-click the MURDER REACH button)
 local reachPopup = Instance.new("Frame")
@@ -3409,6 +3613,20 @@ do
     end)
 end
 
+do -- ANIMATED UI toggle
+    local animBtn, animStroke = makeButton(settingsPage, "✨ ANIMATED UI", 402, Color3.fromRGB(0, 200, 180))
+    setToggleVisual(animStroke, settings.animatedUI == true)
+    animBtn.MouseButton1Click:Connect(function()
+        settings.animatedUI = not settings.animatedUI
+        setToggleVisual(animStroke, settings.animatedUI)
+        saveSettings()
+        setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
+    end)
+    if settingsPage:IsA("ScrollingFrame") then
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 470)
+    end
+end
+
 local themeBtn = makeButton(settingsPage, "🎨 THEME", 252, Color3.fromRGB(255, 120, 0))
 local fontBtn = makeButton(settingsPage, "🔤 FONT", 302, Color3.fromRGB(180, 80, 255))
 
@@ -3520,6 +3738,13 @@ applyBackground()
 applyAll()
 setTab("ESP")
 
+-- loading screen: reveal the window once everything is built
+if loadingFinish then
+    loadingFinish(function()
+        rgbBorder.Visible = true
+    end)
+end
+
 -- ANIMATED BACKGROUND: started only when loader.lua provided the module
 do
     local env = getgenv and getgenv()
@@ -3530,4 +3755,4 @@ do
     end
 end
 
-print("MM2 Helper v3.2 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.3 Loaded - tween coins, reach, live Show Both, games, free-look invis")
