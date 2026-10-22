@@ -1,3 +1,4 @@
+-- MM2 Helper v3.2 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -239,7 +240,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.1"
+versionBadge.Text = "v3.2"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -3306,6 +3307,10 @@ bgBox.Parent = settingsPage
 corner(bgBox, 6)
 
 local function applyBackground()
+    -- a static image replaces any running animation
+    local env = getgenv and getgenv() or nil
+    if env and env.MM2HubGif then env.MM2HubGif.stop() end
+    if env and env.MM2HubBg then env.MM2HubBg.stop() end
     local id = settings.bgId or ""
     bgImage.Image = (id ~= "") and ("rbxassetid://" .. id) or ""
 end
@@ -3371,14 +3376,22 @@ do
     corner(animBox, 6)
 
     animBox.FocusLost:Connect(function(enterPressed)
-        if not enterPressed then return end
-        local text = animBox.Text
-        if text == "" then return end
-        if text:find("giphy") then
-            setStatus("Roblox can't show giphy GIFs (only still images). Use an image ID above.", COLOR_RED)
-        else
-            setStatus("Animated backgrounds aren't supported yet. Use an image ID above.", COLOR_DIM)
+        if not enterPressed or animBox.Text == "" then return end
+        local env = getgenv and getgenv() or nil
+        if not (env and env.MM2HubGif) then
+            setStatus("Animated backgrounds need loader.lua", COLOR_RED)
+            return
         end
+        local link = animBox.Text
+        setStatus("Loading animated background...", COLOR_GOLD)
+        task.spawn(function()
+            local ok, msg = env.MM2HubGif.play(bgImage, link, 308, 462)
+            if ok then
+                setStatus("Animated background on (" .. msg .. ")", COLOR_GREEN)
+            else
+                setStatus(msg, COLOR_RED)
+            end
+        end)
     end)
 
     local randomBtn = makeButton(settingsPage, "🎲 RANDOM", 152, Color3.fromRGB(255, 120, 200))
@@ -3517,4 +3530,4 @@ do
     end
 end
 
-print("MM2 Helper v3.1 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.2 Loaded - tween coins, reach, live Show Both, games, free-look invis")
