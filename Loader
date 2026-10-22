@@ -1,6 +1,6 @@
 -- loader.lua
 
-local BASE = "https://raw.githubusercontent.com/fwerscripts43/loader/main/"
+local BASE = "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
 
 local bgModule = loadstring(game:HttpGet(BASE .. "bg_module.lua"))()
 bgModule.baseUrl = BASE
