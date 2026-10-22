@@ -1,4 +1,4 @@
--- MM2 Helper v3.3 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.4 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -315,7 +315,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.3"
+versionBadge.Text = "v3.4"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -3519,10 +3519,17 @@ local function applyBackground()
     bgImage.Image = (id ~= "") and ("rbxassetid://" .. id) or ""
 end
 
+-- filled in by the ANIMATED.. box (see BACKGROUND EXTRAS)
+local animUI = {}
+
 local applyBgBtn = makeButton(settingsPage, "🖼 APPLY BACKGROUND", 102, COLOR_GOLD)
 local resetBgBtn = makeButton(settingsPage, "↺ RESET BACKGROUND", 202, COLOR_DIM)
 
 applyBgBtn.MouseButton1Click:Connect(function()
+    if animUI.box and animUI.box.Text ~= "" and animUI.play then
+        animUI.play(animUI.box.Text)
+        return
+    end
     local ContentProvider = game:GetService("ContentProvider")
     -- takes the first number in what's typed, so a full library URL or "rbxassetid://123" also works
     local digits = bgBox.Text:match("(%d+)")
@@ -3579,14 +3586,14 @@ do
     animBox.Parent = settingsPage
     corner(animBox, 6)
 
-    animBox.FocusLost:Connect(function(enterPressed)
-        if not enterPressed or animBox.Text == "" then return end
+    animUI.box = animBox
+
+    animUI.play = function(link)
         local env = getgenv and getgenv() or nil
         if not (env and env.MM2HubGif) then
             setStatus("Animated backgrounds need loader.lua", COLOR_RED)
             return
         end
-        local link = animBox.Text
         setStatus("Loading animated background...", COLOR_GOLD)
         task.spawn(function()
             local ok, msg = env.MM2HubGif.play(bgImage, link, 308, 462)
@@ -3596,6 +3603,12 @@ do
                 setStatus(msg, COLOR_RED)
             end
         end)
+    end
+
+    animBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed and animBox.Text ~= "" then
+            animUI.play(animBox.Text)
+        end
     end)
 
     local randomBtn = makeButton(settingsPage, "🎲 RANDOM", 152, Color3.fromRGB(255, 120, 200))
@@ -3755,4 +3768,4 @@ do
     end
 end
 
-print("MM2 Helper v3.3 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.4 Loaded - tween coins, reach, live Show Both, games, free-look invis")
