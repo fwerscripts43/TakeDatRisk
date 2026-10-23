@@ -1,4 +1,4 @@
--- MM2 Helper v3.7 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.8 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -23,6 +23,28 @@ getgenv().MM2HubBind = function(signal, fn)
         return fn(...)
     end)
     return c
+end
+
+-- BUTTON GUARD: if a button's handler errors, the button shuts down and says so when pressed
+getgenv().MM2HubClick = function(obj, evName, fn)
+    local broken = false
+    return obj[evName]:Connect(function(...)
+        if broken then
+            if obj:IsA("TextButton") then
+                obj.Text = "FUNCTION NOT WORKING, TRY REFRESHING"
+                task.delay(2.5, function()
+                    if obj.Parent and broken then obj.Text = "BROKEN" end
+                end)
+            end
+            return
+        end
+        local ok, err = pcall(fn, ...)
+        if not ok then
+            broken = true
+            warn("MM2 Hub button error: " .. tostring(err))
+            if obj:IsA("TextButton") then obj.Text = "BROKEN" end
+        end
+    end)
 end
 
 for _, gui in pairs(playerGui:GetChildren()) do
@@ -175,6 +197,9 @@ screenGui.Parent = playerGui
 
 -- LOADING SCREEN: blur + loading bar (bottom-right) + caption, removed once the window is ready
 local loadingFinish
+if getgenv().MM2HubBoot then
+    loadingFinish = getgenv().MM2HubBoot.finish
+else
 do
     local blur = Instance.new("BlurEffect")
     blur.Name = "MM2Hub_Blur"
@@ -241,6 +266,7 @@ do
             showMain()
         end)
     end
+end
 end
 
 local rgbBorder = Instance.new("Frame")
@@ -332,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.7"
+versionBadge.Text = "v3.8"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -402,7 +428,7 @@ for i, name in ipairs(TAB_NAMES) do
     tb.ZIndex = 4
     tb.Parent = mainFrame
     corner(tb, 6)
-    tb.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(tb, "MouseButton1Click", function()
         setTab(name)
     end)
     tabButtons[name] = tb
@@ -461,7 +487,7 @@ do
     refreshBtn.ZIndex = 4
     refreshBtn.Parent = headerBar
     corner(refreshBtn, 5)
-    refreshBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(refreshBtn, "MouseButton1Click", function()
         local refresh = getgenv().MM2HubRefresh
         if not refresh then
             setStatus("Refresh needs loader.lua", COLOR_RED)
@@ -536,7 +562,7 @@ local function makeButton(parent, text, yPos, bgColor)
             TweenService:Create(stroke, TweenInfo.new(0.06), { Thickness = 3.5 }):Play()
         end
     end)
-    btn.MouseButton1Up:Connect(function()
+    getgenv().MM2HubClick(btn, "MouseButton1Up", function()
         TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(24, 24, 36) }):Play()
         TweenService:Create(stroke, TweenInfo.new(0.15), { Thickness = 1.5 }):Play()
     end)
@@ -726,7 +752,7 @@ local viewBothBtn, viewBothStroke = makeButton(espPage, "👁 VIEW BOTH", 100, C
 local seeAllBtn, seeAllStroke = makeButton(espPage, "◈ SEE ALL", 150, Color3.fromRGB(255, 200, 50))
 local tracersBtn, tracersStroke = makeButton(espPage, "➳ TRACERS", 200, Color3.fromRGB(80, 220, 255))
 
-findMurderBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(findMurderBtn, "MouseButton1Click", function()
     clearOutlines()
     local murderer = findMurderer()
     if murderer then
@@ -737,7 +763,7 @@ findMurderBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-findSheriffBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(findSheriffBtn, "MouseButton1Click", function()
     clearOutlines()
     local sheriff = findSheriffThatsNotMe()
     if sheriff then
@@ -787,7 +813,7 @@ local function refreshViewBoth(force)
     setStatus(table.concat(lines, "\n"), COLOR_TEXT)
 end
 
-viewBothBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(viewBothBtn, "MouseButton1Click", function()
     viewBothOn = not viewBothOn
     viewBothGen = viewBothGen + 1
     local gen = viewBothGen
@@ -813,7 +839,7 @@ viewBothBtn.MouseButton1Click:Connect(function()
 end)
 
 local seeAllOn = false
-seeAllBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(seeAllBtn, "MouseButton1Click", function()
     seeAllOn = not seeAllOn
     clearOutlines()
     if not seeAllOn then
@@ -926,7 +952,7 @@ task.spawn(function()
     end
 end)
 
-tracersBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(tracersBtn, "MouseButton1Click", function()
     tracersOn = not tracersOn
     if tracersOn then
         tracersBtn.Text = "➳ HIDE TRACERS"
@@ -1111,7 +1137,7 @@ local function setAimBound(on)
     end
 end
 
-toggleAimBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(toggleAimBtn, "MouseButton1Click", function()
     aimEnabled = not aimEnabled
     if aimEnabled then
         toggleAimBtn.Text = "◎ DISABLE AUTO AIM"
@@ -1167,7 +1193,7 @@ local function createPlayerButton(plr)
     nameLabel.ZIndex = 5
     nameLabel.Parent = btn
 
-    btn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(btn, "MouseButton1Click", function()
         target = plr
         for _, v in ipairs(scrollingFrame:GetChildren()) do
             if v:IsA("TextButton") then
@@ -1265,7 +1291,7 @@ local function startAutoShootLoop()
     end)
 end
 
-autoShootBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(autoShootBtn, "MouseButton1Click", function()
     if not autoShootOn then
         if not hasLocalGun() then
             setStatus("You need the Gun tool to use Auto Shoot.", COLOR_RED)
@@ -1343,7 +1369,7 @@ local function murdWinLoop()
     end
 end
 
-autoMurdWinBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(autoMurdWinBtn, "MouseButton1Click", function()
     murdWinOn = not murdWinOn
     if murdWinOn then
         autoMurdWinBtn.Text = "⚔ STOP MURD WIN"
@@ -1430,7 +1456,7 @@ local function autoGunLoop()
     end
 end
 
-autoGunBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(autoGunBtn, "MouseButton1Click", function()
     autoGunOn = not autoGunOn
     if autoGunOn then
         autoGunBtn.Text = "🔫 STOP AUTO GUN"
@@ -1511,7 +1537,7 @@ local function startReachLoop()
     end)
 end
 
-reachBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(reachBtn, "MouseButton1Click", function()
     reachOn = not reachOn
     if reachOn then
         reachBtn.Text = "📏 STOP REACH"
@@ -1676,7 +1702,7 @@ do
         end
     end)
 
-    hbBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(hbBtn, "MouseButton1Click", function()
         on = not on
         setToggleVisual(hbStroke, on)
         if on then
@@ -1810,7 +1836,7 @@ reachDone.ZIndex = 21
 reachDone.Parent = reachPopup
 corner(reachDone, 6)
 
-reachDone.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(reachDone, "MouseButton1Click", function()
     reachPopup.Visible = false
 end)
 
@@ -2007,11 +2033,11 @@ speedPanel, setSpeedOpen, isSpeedOpen = makeSidePanel(230)
         end
     end)
 
-    speedBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(speedBtn, "MouseButton1Click", function()
         setAimOpen(false)
         setSpeedOpen(not isSpeedOpen())
     end)
-    speedDone.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(speedDone, "MouseButton1Click", function()
         speedOn = true
         settings.walkSpeed = speedValue
         saveSettings()
@@ -2019,7 +2045,7 @@ speedPanel, setSpeedOpen, isSpeedOpen = makeSidePanel(230)
         setSpeedOpen(false)
         setStatus("Speed set to " .. speedValue, COLOR_GREEN)
     end)
-    speedReset.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(speedReset, "MouseButton1Click", function()
         speedOn = false
         local h = currentHumanoid()
         local original = (h and baseWalk[h]) or 16
@@ -2048,21 +2074,21 @@ aimPanel, setAimOpen, isAimOpen = makeSidePanel(200)
         murdBtn.BackgroundColor3 = (aimMode == "MURD") and activeThemeDef.accent or Color3.fromRGB(40, 40, 60)
     end
 
-    regBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(regBtn, "MouseButton1Click", function()
         aimMode = "REGULAR"
         settings.aimMode = "REGULAR"
         saveSettings()
         refreshAimModes()
         setStatus("Aim mode: REGULAR (pick a target)", COLOR_BLUE)
     end)
-    murdBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(murdBtn, "MouseButton1Click", function()
         aimMode = "MURD"
         settings.aimMode = "MURD"
         saveSettings()
         refreshAimModes()
         setStatus("Aim mode: AUTO AIM MURD (locks the knife holder)", COLOR_RED)
     end)
-    aimDone.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(aimDone, "MouseButton1Click", function()
         setAimOpen(false)
     end)
     toggleAimBtn.MouseButton2Click:Connect(function()
@@ -2365,7 +2391,7 @@ do
         refresh()
     end
 
-    autoCoinBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(autoCoinBtn, "MouseButton1Click", function()
         if isMobile then
             openPanel()
         else
@@ -2374,16 +2400,16 @@ do
         refresh()
     end)
     autoCoinBtn.MouseButton2Click:Connect(openPanel)
-    onOffBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(onOffBtn, "MouseButton1Click", function()
         toggleCoin()
         refresh()
     end)
-    waitBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(waitBtn, "MouseButton1Click", function()
         settings.coinWait = not (settings.coinWait ~= false)
         saveSettings()
         refresh()
     end)
-    doneBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(doneBtn, "MouseButton1Click", function()
         isOpen = false
         saveSettings()
     end)
@@ -2415,7 +2441,7 @@ do
         setAnimateDisabled(char, true)
     end)
 
-    noAnimBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(noAnimBtn, "MouseButton1Click", function()
         on = not on
         settings.noAnim = on
         saveSettings()
@@ -2492,7 +2518,7 @@ do
         end
     end)
 
-    optBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(optBtn, "MouseButton1Click", function()
         on = not on
         settings.optimizer = on
         saveSettings()
@@ -2587,7 +2613,7 @@ local function removeInvis(char)
     end)
 end
 
-invisBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(invisBtn, "MouseButton1Click", function()
     invisActive = not invisActive
     local char = player.Character
     if invisActive then
@@ -2674,7 +2700,7 @@ local function setCollisionForChar(char, canCollide)
     end
 end
 
-noclipJumpBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(noclipJumpBtn, "MouseButton1Click", function()
     noclip = not noclip
     infiniteJump = not infiniteJump
     if noclip then
@@ -3307,7 +3333,7 @@ local function startReactionGame()
         end)
     end
 
-    pad.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(pad, "MouseButton1Click", function()
         if round >= 5 then
             round = 0
             times = {}
@@ -3421,7 +3447,7 @@ do
         close.Font = activeFont
         close.Parent = frame
         corner(close, 6)
-        close.MouseButton1Click:Connect(function()
+        getgenv().MM2HubClick(close, "MouseButton1Click", function()
             stopGame()
         end)
 
@@ -3646,7 +3672,7 @@ do
         end
 
         for i, b in ipairs(pads) do
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 if showing or not alive then return end
                 flash(i, 0.18)
                 table.insert(input, i)
@@ -3714,7 +3740,7 @@ do
             b.Font = activeFont
             b.Parent = frame
             corner(b, 42)
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 if not alive or litIndex ~= i then return end
                 score = score + 1
                 litIndex = nil
@@ -3814,7 +3840,7 @@ do
             b.Font = activeFont
             b.Parent = frame
             corner(b, 10)
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 if not alive then return end
                 if i == inkIdx then
                     score = score + 1
@@ -3883,7 +3909,7 @@ do
             corner(b, math.floor(size / 2))
             local bb = { ui = b, y = 290, speed = math.random(40, 80) + score }
             table.insert(bubbles, bb)
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 if not alive or not b.Parent then return end
                 score = score + 1
                 b:Destroy()
@@ -3967,7 +3993,7 @@ do
             corner(b, 10)
             cards[i] = { ui = b, sym = deck[i], shown = false, done = false }
 
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 local card = cards[i]
                 if not alive or lock or card.shown or card.done then return end
                 card.shown = true
@@ -4065,7 +4091,7 @@ do
             corner(b, 12)
             tiles[k] = b
 
-            b.MouseButton1Click:Connect(function()
+            getgenv().MM2HubClick(b, "MouseButton1Click", function()
                 if not alive then return end
                 local e = emptyIndex()
                 local adjacent = false
@@ -4181,17 +4207,17 @@ do -- game menu: a card for each game
         card.MouseButton1Down:Connect(function()
             TweenService:Create(cStroke, TweenInfo.new(0.06), { Thickness = 3.5 }):Play()
         end)
-        card.MouseButton1Up:Connect(function()
+        getgenv().MM2HubClick(card, "MouseButton1Up", function()
             TweenService:Create(cStroke, TweenInfo.new(0.15), { Thickness = 1.5 }):Play()
         end)
-        card.MouseButton1Click:Connect(function()
+        getgenv().MM2HubClick(card, "MouseButton1Click", function()
             toggleGame(e.key)
         end)
     end
 
     local rows = math.ceil(#ENTRIES / 2)
     local stopGameBtn = makeButton(gamesPage, "■ STOP GAME", rows * CARD_H + 4, COLOR_DIM)
-    stopGameBtn.MouseButton1Click:Connect(function() stopGame() end)
+    getgenv().MM2HubClick(stopGameBtn, "MouseButton1Click", function() stopGame() end)
     if gamesPage:IsA("ScrollingFrame") then
         gamesPage.CanvasSize = UDim2.new(0, 0, 0, rows * CARD_H + 120)
     end
@@ -4259,7 +4285,7 @@ local animUI = {}
 local applyBgBtn = makeButton(settingsPage, "🖼 APPLY BACKGROUND", 102, COLOR_GOLD)
 local resetBgBtn = makeButton(settingsPage, "↺ RESET BACKGROUND", 202, COLOR_DIM)
 
-applyBgBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(applyBgBtn, "MouseButton1Click", function()
     if animUI.box and animUI.box.Text ~= "" and animUI.play then
         animUI.play(animUI.box.Text)
         return
@@ -4288,7 +4314,7 @@ applyBgBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
-resetBgBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(resetBgBtn, "MouseButton1Click", function()
     settings.bgId = ""
     bgBox.Text = ""
     applyBackground()
@@ -4346,7 +4372,7 @@ do
     end)
 
     local randomBtn = makeButton(settingsPage, "🎲 RANDOM", 152, Color3.fromRGB(255, 120, 200))
-    randomBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(randomBtn, "MouseButton1Click", function()
         if #RANDOM_BG_IDS == 0 then
             setStatus("Add decal IDs to RANDOM_BG_IDS in the script first", COLOR_RED)
             return
@@ -4363,7 +4389,7 @@ end
 do -- ANIMATED UI toggle
     local animBtn, animStroke = makeButton(settingsPage, "✨ ANIMATED UI", 402, Color3.fromRGB(0, 200, 180))
     setToggleVisual(animStroke, settings.animatedUI == true)
-    animBtn.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(animBtn, "MouseButton1Click", function()
         settings.animatedUI = not settings.animatedUI
         setToggleVisual(animStroke, settings.animatedUI)
         saveSettings()
@@ -4415,7 +4441,7 @@ do -- 3D UI toggle: parallax window with a drop shadow and a glossy edge
         shadow.Size = mainFrame.Size
     end)
 
-    btn3d.MouseButton1Click:Connect(function()
+    getgenv().MM2HubClick(btn3d, "MouseButton1Click", function()
         settings.ui3d = not settings.ui3d
         saveSettings()
         setToggleVisual(stroke3d, settings.ui3d)
@@ -4442,13 +4468,13 @@ local function updateChoiceLabels()
     fontBtn.Text = "🔤 FONT: " .. settings.fontChoice
 end
 
-themeBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(themeBtn, "MouseButton1Click", function()
     settings.themeChoice = cycleValue(THEME_ORDER, settings.themeChoice)
     saveSettings()
     applyAll()
 end)
 
-fontBtn.MouseButton1Click:Connect(function()
+getgenv().MM2HubClick(fontBtn, "MouseButton1Click", function()
     settings.fontChoice = cycleValue(FONT_ORDER, settings.fontChoice)
     saveSettings()
     applyAll()
@@ -4556,4 +4582,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.7 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.8 Loaded - tween coins, reach, live Show Both, games, free-look invis")
