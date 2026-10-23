@@ -1,4 +1,4 @@
--- MM2 Helper v3.6 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.7 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -8,6 +8,22 @@ local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- RUN GENERATION: the updater bumps this on every reload. Loops and connections
+-- from an older copy see the number changed and stop by themselves.
+local HUB_GEN = (getgenv().MM2HubGen or 0) + 1
+getgenv().MM2HubGen = HUB_GEN
+getgenv().MM2HubBind = function(signal, fn)
+    local c
+    c = signal:Connect(function(...)
+        if HUB_GEN ~= getgenv().MM2HubGen then
+            if c then c:Disconnect() end
+            return
+        end
+        return fn(...)
+    end)
+    return c
+end
 
 for _, gui in pairs(playerGui:GetChildren()) do
     if gui.Name == "MM2_Helper_GUI" or gui.Name == "MM2Hub_StackGame" then
@@ -161,6 +177,7 @@ screenGui.Parent = playerGui
 local loadingFinish
 do
     local blur = Instance.new("BlurEffect")
+    blur.Name = "MM2Hub_Blur"
     blur.Size = 0
     blur.Parent = game:GetService("Lighting")
     TweenService:Create(blur, TweenInfo.new(0.4), { Size = 18 }):Play()
@@ -202,7 +219,7 @@ do
     local LOAD_TIME = 2.5
     local progress, startT = 0, os.clock()
     local conn
-    conn = RunService.Heartbeat:Connect(function()
+    conn = getgenv().MM2HubBind(RunService.Heartbeat, function()
         progress = math.min(1, (os.clock() - startT) / LOAD_TIME)
         barFill.Size = UDim2.new(progress, 0, 1, 0)
     end)
@@ -315,7 +332,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.6"
+versionBadge.Text = "v3.7"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -428,6 +445,36 @@ resultLabel.Parent = resultContainer
 local function setStatus(text, color)
     resultLabel.Text = text
     resultLabel.TextColor3 = color or COLOR_DIM
+end
+
+-- REFRESH: asks the updater whether GitHub has a newer version, reloads only if it does
+do
+    local refreshBtn = Instance.new("TextButton")
+    refreshBtn.Size = UDim2.new(0, 58, 0, 20)
+    refreshBtn.Position = UDim2.new(1, -116, 0.5, -10)
+    refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
+    refreshBtn.Text = "REFRESH"
+    refreshBtn.TextColor3 = COLOR_DIM
+    refreshBtn.TextScaled = true
+    refreshBtn.Font = activeFont
+    refreshBtn.AutoButtonColor = true
+    refreshBtn.ZIndex = 4
+    refreshBtn.Parent = headerBar
+    corner(refreshBtn, 5)
+    refreshBtn.MouseButton1Click:Connect(function()
+        local refresh = getgenv().MM2HubRefresh
+        if not refresh then
+            setStatus("Refresh needs loader.lua", COLOR_RED)
+            return
+        end
+        setStatus("Checking GitHub...")
+        local ok, msg = refresh()
+        if not ok then
+            setStatus(msg, COLOR_RED)
+        elseif msg ~= "Updated" then
+            setStatus(msg, COLOR_DIM)
+        end
+    end)
 end
 
 local function setToggleVisual(stroke, on)
@@ -663,7 +710,7 @@ local function startDecor(deco)
     decorLayer:ClearAllChildren()
     if not deco then return end
     task.spawn(function()
-        while gen == decorGen do
+        while gen == decorGen and HUB_GEN == getgenv().MM2HubGen do
             spawnDecorItem(deco, gen)
             task.wait(deco.rate)
         end
@@ -758,7 +805,7 @@ viewBothBtn.MouseButton1Click:Connect(function()
     lastMurd, lastSheriff = nil, nil
     refreshViewBoth(true)
     task.spawn(function()
-        while viewBothOn and gen == viewBothGen do
+        while viewBothOn and gen == viewBothGen and HUB_GEN == getgenv().MM2HubGen do
             task.wait(0.5)
             pcall(refreshViewBoth, false)
         end
@@ -871,7 +918,7 @@ local function refreshTracers()
 end
 
 task.spawn(function()
-    while true do
+    while HUB_GEN == getgenv().MM2HubGen do
         task.wait(0.2)
         if tracersOn then
             pcall(refreshTracers)
@@ -1147,8 +1194,8 @@ local function updatePlayerList()
     end
     scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 14)
 end
-Players.PlayerAdded:Connect(updatePlayerList)
-Players.PlayerRemoving:Connect(updatePlayerList)
+getgenv().MM2HubBind(Players.PlayerAdded, updatePlayerList)
+getgenv().MM2HubBind(Players.PlayerRemoving, updatePlayerList)
 updatePlayerList()
 
 -- AUTO SHOOT: a ring around the crosshair. When the murderer is inside the ring, in clear
@@ -1202,7 +1249,7 @@ local function startAutoShootLoop()
     shootLoopRunning = true
     task.spawn(function()
         local shotTimer = 0
-        while autoShootOn do
+        while autoShootOn and HUB_GEN == getgenv().MM2HubGen do
             local dt = task.wait()
             shotTimer = shotTimer + dt
             local canFire = shotTimer >= 0.15
@@ -1268,7 +1315,7 @@ end)
 local murdWinOn = false
 
 local function murdWinLoop()
-    while murdWinOn do
+    while murdWinOn and HUB_GEN == getgenv().MM2HubGen do
         task.wait(0.1)
         local char = player.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1329,7 +1376,7 @@ local function findDroppedGun()
 end
 
 local function autoGunLoop()
-    while autoGunOn do
+    while autoGunOn and HUB_GEN == getgenv().MM2HubGen do
         task.wait(0.2)
         local char = player.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1449,7 +1496,7 @@ local function startReachLoop()
     if reachRunning then return end
     reachRunning = true
     task.spawn(function()
-        while reachOn do
+        while reachOn and HUB_GEN == getgenv().MM2HubGen do
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr ~= player then
                     pcall(setReach, plr, true)
@@ -1533,7 +1580,7 @@ do
             startY = UserInputService:GetMouseLocation().Y
             startH = rgbBorder.Size.Y.Offset
         end)
-        UserInputService.InputChanged:Connect(function(input)
+        getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
             if not dragging then return end
             if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
                 return
@@ -1544,7 +1591,7 @@ do
             mainFrame.Size = UDim2.new(0, 308, 0, h - 8)
             settings.windowH = h
         end)
-        UserInputService.InputEnded:Connect(function(input)
+        getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
             if not dragging then return end
             if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
                 return
@@ -1560,7 +1607,7 @@ do
     makeGrip(0, 1)
     makeLengthGrip()
 
-    UserInputService.InputChanged:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
         if not resizing then return end
         if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
             return
@@ -1570,7 +1617,7 @@ do
         settings.uiScale = s
         uiScale.Scale = s
     end)
-    UserInputService.InputEnded:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
         if not resizing then return end
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
             return
@@ -1581,7 +1628,7 @@ do
     end)
 
     local t0 = os.clock()
-    RunService.Heartbeat:Connect(function()
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
         if resizing then return end
         local base = settings.uiScale or 1
         if settings.animatedUI then
@@ -1614,7 +1661,7 @@ do
     end
 
     local acc = 0
-    RunService.Heartbeat:Connect(function(dt)
+    getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
         if not on then return end
         acc = acc + dt
         if acc < 0.5 then return end
@@ -1737,13 +1784,13 @@ end
 track.InputBegan:Connect(beginSlide)
 knob.InputBegan:Connect(beginSlide)
 
-UserInputService.InputChanged:Connect(function(input)
+getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
     if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         sliderFromX(input.Position.X)
     end
 end)
 
-UserInputService.InputEnded:Connect(function(input)
+getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
     if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
         draggingSlider = false
         rgbBorder.Draggable = true
@@ -1802,7 +1849,7 @@ do
         pStroke.Parent = panel
 
         local progress, isOpen = 0, false
-        RunService.RenderStepped:Connect(function(dt)
+        getgenv().MM2HubBind(RunService.RenderStepped, function(dt)
             if not isOpen and progress <= 0 then
                 panel.Visible = false
                 return
@@ -1926,12 +1973,12 @@ speedPanel, setSpeedOpen, isSpeedOpen = makeSidePanel(230)
     end
     sTrack.InputBegan:Connect(beginSpeedDrag)
     sKnob.InputBegan:Connect(beginSpeedDrag)
-    UserInputService.InputChanged:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
         if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             speedFromX(input.Position.X)
         end
     end)
-    UserInputService.InputEnded:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
         if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             draggingSpeed = false
             rgbBorder.Draggable = true
@@ -1949,7 +1996,7 @@ speedPanel, setSpeedOpen, isSpeedOpen = makeSidePanel(230)
     end
 
     -- remember each humanoid's original speed, and keep the chosen speed applied (also after respawn)
-    RunService.Heartbeat:Connect(function()
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
         local h = currentHumanoid()
         if not h then return end
         if baseWalk[h] == nil then
@@ -2075,7 +2122,7 @@ local function tweenToCoin(root, coin)
     end)
     tween:Play()
     local t = 0
-    while not done and autoCoinOn and coin.Parent and t < duration + 1 do
+    while not done and autoCoinOn and coin.Parent and t < duration + 1 and HUB_GEN == getgenv().MM2HubGen do
         task.wait(0.05)
         t = t + 0.05
     end
@@ -2095,7 +2142,7 @@ local function autoCoinLoop()
     end
 
     local skipped = {}
-    while autoCoinOn do
+    while autoCoinOn and HUB_GEN == getgenv().MM2HubGen do
         local char = player.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -2268,12 +2315,12 @@ do
     end
     track.InputBegan:Connect(beginDrag)
     knob.InputBegan:Connect(beginDrag)
-    UserInputService.InputChanged:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             speedFromX(input.Position.X)
         end
     end)
-    UserInputService.InputEnded:Connect(function(input)
+    getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             dragging = false
             rgbBorder.Draggable = true
@@ -2292,7 +2339,7 @@ do
     end
 
     local progress, isOpen = 0, false
-    RunService.RenderStepped:Connect(function(dt)
+    getgenv().MM2HubBind(RunService.RenderStepped, function(dt)
         if not isOpen and progress <= 0 then
             panel.Visible = false
             return
@@ -2355,7 +2402,7 @@ do
         end
     end
 
-    RunService.Heartbeat:Connect(function()
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
         if not on then return end
         local char = player.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -2439,7 +2486,7 @@ do
         end
     end
 
-    workspace.DescendantAdded:Connect(function(o)
+    getgenv().MM2HubBind(workspace.DescendantAdded, function(o)
         if on then
             pcall(strip, o)
         end
@@ -2561,7 +2608,7 @@ invisBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
+getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
     if invisActive and not invisSinking and not invisRising and input.UserInputType == Enum.UserInputType.MouseMovement then
         invisYaw = invisYaw - input.Delta.X * 0.004
         invisPitch = math.clamp(invisPitch - input.Delta.Y * 0.004, -1.3, 1.3)
@@ -2579,7 +2626,7 @@ player.CharacterAdded:Connect(function(char)
     end
 end)
 
-RunService.RenderStepped:Connect(function()
+getgenv().MM2HubBind(RunService.RenderStepped, function()
     if not invisActive and not invisSinking and not invisRising then return end
     local char = player.Character
     if not char then return end
@@ -2647,7 +2694,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
-UserInputService.JumpRequest:Connect(function()
+getgenv().MM2HubBind(UserInputService.JumpRequest, function()
     if infiniteJump then
         local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
         if humanoid then
@@ -2894,7 +2941,7 @@ local function startBlockStack()
     moving.BackgroundColor3 = blockColor(1)
     moving.Position = UDim2.new(0, 0, 0, rowY(1))
 
-    local heartConn = RunService.Heartbeat:Connect(function(dt)
+    local heartConn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
         if over then return end
         mx = mx + mdir * speed * dt
         if mx < 0 then
@@ -2908,7 +2955,7 @@ local function startBlockStack()
         updateShift()
     end)
 
-    local inputConn = UserInputService.InputBegan:Connect(function(input, gp)
+    local inputConn = getgenv().MM2HubBind(UserInputService.InputBegan, function(input, gp)
         if gp then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.KeyCode == Enum.KeyCode.Space then
             if over then
@@ -2965,7 +3012,7 @@ local function startObbyGame()
     local finished = false
     local lastStatus = 0
 
-    local conn = RunService.Heartbeat:Connect(function()
+    local conn = getgenv().MM2HubBind(RunService.Heartbeat, function()
         local c = player.Character
         local r = c and c:FindFirstChild("HumanoidRootPart")
         if not r or finished then return end
@@ -3050,7 +3097,7 @@ local function startLootGame()
     local score, timeLeft, done = 0, 60, false
     local lastStatus = 0
 
-    local conn = RunService.Heartbeat:Connect(function(dt)
+    local conn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
         if done then return end
         local c = player.Character
         local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -3121,7 +3168,7 @@ local function startDodgeGame()
     local spawnAcc = 0
     local lastStatus = 0
 
-    local conn = RunService.Heartbeat:Connect(function(dt)
+    local conn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
         if not alive then return end
         local c = player.Character
         local r = c and c:FindFirstChild("HumanoidRootPart")
@@ -3410,7 +3457,7 @@ do
                 sW, sH = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
             end
         end)
-        local c1 = UserInputService.InputChanged:Connect(function(input)
+        local c1 = getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
             if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                 local m = UserInputService:GetMouseLocation()
                 local nw = math.clamp(sW + (m.X - sMouse.X), 240, 700)
@@ -3418,7 +3465,7 @@ do
                 frame.Size = UDim2.new(0, nw, 0, nh)
             end
         end)
-        local c2 = UserInputService.InputEnded:Connect(function(input)
+        local c2 = getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
             if resizing and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
                 resizing = false
                 frame.Draggable = true
@@ -3490,7 +3537,7 @@ do
         end
 
         local conn
-        conn = RunService.Heartbeat:Connect(function(dt)
+        conn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
             if not alive then return end
             local left = DURATION - (os.clock() - startT)
             if left <= 0 then
@@ -3684,7 +3731,7 @@ do
         end
 
         local conn
-        conn = RunService.Heartbeat:Connect(function(dt)
+        conn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
             if not alive then return end
             local left = DURATION - (os.clock() - startT)
             if left <= 0 then
@@ -3786,7 +3833,7 @@ do
         newRound()
 
         local conn
-        conn = RunService.Heartbeat:Connect(function()
+        conn = getgenv().MM2HubBind(RunService.Heartbeat, function()
             if not alive then return end
             local left = DURATION - (os.clock() - startT)
             if left <= 0 then
@@ -3844,7 +3891,7 @@ do
         end
 
         local conn
-        conn = RunService.Heartbeat:Connect(function(dt)
+        conn = getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
             if not alive then return end
             local left = DURATION - (os.clock() - startT)
             if left <= 0 then
@@ -4348,7 +4395,7 @@ do -- 3D UI toggle: parallax window with a drop shadow and a glossy edge
     gloss.Enabled = false
     gloss.Parent = mainFrame
 
-    RunService.Heartbeat:Connect(function()
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
         if not settings.ui3d then
             shadow.Visible = false
             gloss.Enabled = false
@@ -4456,7 +4503,7 @@ end
 -- ANIMATION (border + accent dot)
 -- ============================
 local gradAngle = 0
-RunService.Heartbeat:Connect(function(dt)
+getgenv().MM2HubBind(RunService.Heartbeat, function(dt)
     gradAngle = (gradAngle + dt * 60) % 360
     local t = tick()
     rgbGrad.Rotation = gradAngle
@@ -4504,4 +4551,9 @@ do
     end
 end
 
-print("MM2 Helper v3.6 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+if getgenv().MM2HubNotice then
+    setStatus(getgenv().MM2HubNotice, COLOR_GOLD)
+    getgenv().MM2HubNotice = nil
+end
+
+print("MM2 Helper v3.7 Loaded - tween coins, reach, live Show Both, games, free-look invis")
