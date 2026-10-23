@@ -118,6 +118,7 @@ end
 -- stop everything the running copy started, so nothing stacks after a reload
 local function teardown()
     local G = getgenv()
+    G.MM2HubGen = (G.MM2HubGen or 0) + 1 -- every loop from the running copy sees this and stops
     if G.MM2HubBg then pcall(function() G.MM2HubBg.stop() end) end
     if G.MM2HubGif then pcall(function() G.MM2HubGif.stop() end) end
     pcall(function() RunService:UnbindFromRenderStep("MM2HubAutoAim") end)
@@ -223,7 +224,7 @@ local function deploy(src, boot)
 end
 
 -- REFRESH button: ok, message
-function U.refresh()
+function U.refresh(force)
     local boot = makeBoot()
     boot.setStatus("CHECKING FOR UPDATES", 0.15)
     task.wait(PHASE_WAIT)
@@ -233,7 +234,7 @@ function U.refresh()
         boot.abort()
         return false, "Couldn't reach GitHub"
     end
-    if sameAs(getgenv().MM2HubSrc, src) then
+    if not force and sameAs(getgenv().MM2HubSrc, src) then
         boot.abort()
         return true, "Already up to date"
     end
@@ -250,6 +251,56 @@ function U.refresh()
 end
 
 getgenv().MM2HubRefresh = U.refresh
+
+-- VERSION CHANGER: "2.8", "3.4", ... load repo versions/MM2_Helper_v<ver>.lua; "current" = latest
+-- returns ok, message. Old versions use the same backgrounds and GIF module as the current one.
+function U.switch(input)
+    local ver = tostring(input or ""):match("^%s*[vV]?(.-)%s*$")
+    if ver == "" then
+        return false, "Type a version like 2.8 or current"
+    end
+    if ver:lower() == "current" or ver:lower() == "latest" then
+        return U.refresh(true)
+    end
+
+    local okD, helper = pcall(fetch, "versions/MM2_Helper_v" .. ver .. ".lua")
+    if not okD or type(helper) ~= "string" or #helper < 500 then
+        return false, "v" .. ver .. " isn't in the repo's versions folder"
+    end
+    local fn, err = loadstring(helper)
+    if not fn then
+        warn("MM2 Hub: v" .. ver .. " syntax error: " .. tostring(err))
+        return false, "v" .. ver .. " has a syntax error"
+    end
+
+    local cur = getgenv().MM2HubSrc
+    if not cur then
+        local okS, s = pcall(fetchAll)
+        if not okS then return false, "Couldn't reach GitHub" end
+        cur = s
+    end
+    local bundle = {
+        ["bg_module.lua"] = cur["bg_module.lua"],
+        ["gif_module.lua"] = cur["gif_module.lua"],
+        ["MM2_Helper.lua"] = helper,
+    }
+
+    getgenv().MM2HubBoot = nil
+    teardown()
+    local ok, e = pcall(runAll, bundle)
+    getgenv().MM2HubSrc = nil -- the next REFRESH reloads the repo's current version
+    if ok then
+        return true, "Loaded v" .. ver
+    end
+
+    warn("MM2 Hub: v" .. ver .. " failed to start: " .. tostring(e))
+    teardown()
+    getgenv().MM2HubNotice = "v" .. ver .. " failed to start, restored the current version"
+    local okB, eB = pcall(runAll, cur)
+    if not okB then warn("MM2 Hub: restore failed: " .. tostring(eB)) end
+    return false, "v" .. ver .. " failed to start"
+end
+getgenv().MM2HubSwitch = U.switch
 
 -- first run
 local boot = makeBoot()
