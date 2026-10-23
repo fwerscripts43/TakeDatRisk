@@ -1,4 +1,4 @@
--- MM2 Helper v3.9 (Vape V4 style windows), seasonal themes, games)
+-- MM2 Helper v3.9 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -270,12 +270,12 @@ end
 end
 
 local rgbBorder = Instance.new("Frame")
-rgbBorder.Size = UDim2.new(1, 0, 1, 0)
-rgbBorder.Position = UDim2.new(0, 0, 0, 0)
-rgbBorder.BackgroundTransparency = 1
+rgbBorder.Size = UDim2.new(0, 316, 0, 478)
+rgbBorder.Position = UDim2.new(0.5, -158, 0.2, -8)
+rgbBorder.BackgroundColor3 = Color3.fromRGB(255, 0, 128)
 rgbBorder.BorderSizePixel = 0
-rgbBorder.Active = false
-rgbBorder.Draggable = false
+rgbBorder.Active = true
+rgbBorder.Draggable = true
 rgbBorder.ZIndex = 1
 rgbBorder.Parent = screenGui
 corner(rgbBorder, 13)
@@ -290,11 +290,11 @@ local rgbGrad = Instance.new("UIGradient")
 rgbGrad.Parent = rgbBorder
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(1, 0, 1, 0)
-mainFrame.Position = UDim2.new(0, 0, 0, 0)
-mainFrame.BackgroundTransparency = 1
+mainFrame.Size = UDim2.new(0, 308, 0, 470)
+mainFrame.Position = UDim2.new(0, 4, 0, 4)
+mainFrame.BackgroundColor3 = THEMES.DEFAULT.bg
 mainFrame.BorderSizePixel = 0
-mainFrame.ClipsDescendants = false
+mainFrame.ClipsDescendants = true
 mainFrame.ZIndex = 2
 mainFrame.Parent = rgbBorder
 corner(mainFrame, 10)
@@ -316,8 +316,7 @@ decorLayer.Parent = mainFrame
 
 -- HEADER
 local headerBar = Instance.new("Frame")
-headerBar.Size = UDim2.fromOffset(340, 44)
-headerBar.Position = UDim2.new(0.5, -170, 0, 8)
+headerBar.Size = UDim2.new(1, 0, 0, 48)
 headerBar.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 headerBar.BackgroundTransparency = 0.1
 headerBar.BorderSizePixel = 0
@@ -367,43 +366,11 @@ versionBadge.ZIndex = 4
 versionBadge.Parent = headerBar
 corner(versionBadge, 5)
 
--- PAGES: each category is its own Vape-style window (drag it by the window)
+-- PAGES + TABS
+local TAB_NAMES = { "ESP", "COMBAT", "PLAYER", "GAMES", "SETTINGS" }
 local tabButtons, pages = {}, {}
 
 local function makePage(name, scroll)
-    local titles = { ESP = "Render", COMBAT = "Combat", PLAYER = "Utility", GAMES = "Minigames", SETTINGS = "Other" }
-    local title = titles[name] or name
-    local count = 0
-    for _ in pairs(pages) do count = count + 1 end
-
-    local win = Instance.new("Frame")
-    win.Name = title .. "Window"
-    win.Size = UDim2.fromOffset(220, 336)
-    win.Position = UDim2.fromOffset(12 + count * 232, 70)
-    win.BackgroundColor3 = Color3.fromRGB(26, 25, 26)
-    win.BorderSizePixel = 0
-    win.Active = true
-    win.Draggable = true
-    win.ZIndex = 2
-    win.Parent = mainFrame
-    corner(win, 6)
-
-    local head = Instance.new("TextLabel")
-    head.Size = UDim2.new(1, 0, 0, 40)
-    head.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
-    head.BorderSizePixel = 0
-    head.Text = title
-    head.TextColor3 = Color3.fromRGB(230, 230, 230)
-    head.TextSize = 15
-    head.Font = Enum.Font.GothamBold
-    head.TextXAlignment = Enum.TextXAlignment.Left
-    head.ZIndex = 3
-    head.Parent = win
-    corner(head, 6)
-    local headPad = Instance.new("UIPadding")
-    headPad.PaddingLeft = UDim.new(0, 12)
-    headPad.Parent = head
-
     local page
     if scroll then
         page = Instance.new("ScrollingFrame")
@@ -416,12 +383,12 @@ local function makePage(name, scroll)
         page.BorderSizePixel = 0
     end
     page.Name = name .. "Page"
-    page.Size = UDim2.new(1, 0, 0, 290)
-    page.Position = UDim2.new(0, 0, 0, 44)
+    page.Size = UDim2.new(1, -24, 0, 290)
+    page.Position = UDim2.new(0, 12, 0, 96)
     page.BackgroundTransparency = 1
-    page.Visible = true
+    page.Visible = false
     page.ZIndex = 3
-    page.Parent = win
+    page.Parent = mainFrame
     pages[name] = page
     return page
 end
@@ -436,9 +403,35 @@ local activeTab = "ESP"
 
 local function setTab(name)
     activeTab = name
-    for _, page in pairs(pages) do
-        page.Visible = true
+    local accent = activeThemeDef.accent
+    for tabName, page in pairs(pages) do
+        page.Visible = (tabName == name)
     end
+    for tabName, tb in pairs(tabButtons) do
+        local on = (tabName == name)
+        tb.BackgroundColor3 = on and accent or Color3.fromRGB(24, 24, 36)
+        tb.TextColor3 = on and Color3.new(1, 1, 1) or COLOR_DIM
+    end
+end
+
+for i, name in ipairs(TAB_NAMES) do
+    local tb = Instance.new("TextButton")
+    tb.Size = UDim2.new(0.2, -8, 0, 30)
+    tb.Position = UDim2.new((i - 1) * 0.2, 4, 0, 56)
+    tb.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+    tb.BorderSizePixel = 0
+    tb.AutoButtonColor = false
+    tb.Text = name
+    tb.TextColor3 = COLOR_DIM
+    tb.TextScaled = true
+    tb.Font = activeFont
+    tb.ZIndex = 4
+    tb.Parent = mainFrame
+    corner(tb, 6)
+    getgenv().MM2HubClick(tb, "MouseButton1Click", function()
+        setTab(name)
+    end)
+    tabButtons[name] = tb
 end
 
 local espPage, combatPage, playerPage, gamesPage, settingsPage =
@@ -446,8 +439,8 @@ local espPage, combatPage, playerPage, gamesPage, settingsPage =
 
 -- RESULT / STATUS BOX
 local resultContainer = Instance.new("Frame")
-resultContainer.Size = UDim2.fromOffset(340, 40)
-resultContainer.Position = UDim2.new(0.5, -170, 1, -60)
+resultContainer.Size = UDim2.new(1, -24, 0, 60)
+resultContainer.Position = UDim2.new(0, 12, 0, 398)
 resultContainer.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 resultContainer.BackgroundTransparency = 0.15
 resultContainer.BorderSizePixel = 0
@@ -472,38 +465,6 @@ resultLabel.Font = activeFont
 resultLabel.ZIndex = 4
 resultLabel.Parent = resultContainer
 
--- TEXT GUI: lists every module that is on (Vape-style list, top-right)
-do
-    local box = Instance.new("TextLabel")
-    box.Name = "EnabledList"
-    box.AnchorPoint = Vector2.new(1, 0)
-    box.Position = UDim2.new(1, -12, 0, 12)
-    box.Size = UDim2.fromOffset(220, 300)
-    box.BackgroundTransparency = 1
-    box.Text = ""
-    box.TextColor3 = Color3.fromRGB(5, 180, 130)
-    box.TextSize = 14
-    box.Font = Enum.Font.GothamBold
-    box.TextXAlignment = Enum.TextXAlignment.Right
-    box.TextYAlignment = Enum.TextYAlignment.Top
-    box.ZIndex = 5
-    box.Parent = mainFrame
-
-    local lastT = 0
-    getgenv().MM2HubBind(RunService.Heartbeat, function()
-        local now = os.clock()
-        if now - lastT < 0.25 then return end
-        lastT = now
-        local names = {}
-        for _, d in ipairs(screenGui:GetDescendants()) do
-            if d:IsA("UIStroke") and d:GetAttribute("On") and d:GetAttribute("Label") then
-                table.insert(names, d:GetAttribute("Label"))
-            end
-        end
-        box.Text = table.concat(names, "\n")
-    end)
-end
-
 -- ============================
 -- HELPERS
 -- ============================
@@ -512,100 +473,68 @@ local function setStatus(text, color)
     resultLabel.TextColor3 = color or COLOR_DIM
 end
 
--- REFRESH: asks the updater whether GitHub has a newer version, reloads only if it does
-do
-    local refreshBtn = Instance.new("TextButton")
-    refreshBtn.Size = UDim2.new(0, 58, 0, 20)
-    refreshBtn.Position = UDim2.new(1, -116, 0.5, -10)
-    refreshBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-    refreshBtn.Text = "REFRESH"
-    refreshBtn.TextColor3 = COLOR_DIM
-    refreshBtn.TextScaled = true
-    refreshBtn.Font = activeFont
-    refreshBtn.AutoButtonColor = true
-    refreshBtn.ZIndex = 4
-    refreshBtn.Parent = headerBar
-    corner(refreshBtn, 5)
-    getgenv().MM2HubClick(refreshBtn, "MouseButton1Click", function()
-        local refresh = getgenv().MM2HubRefresh
-        if not refresh then
-            setStatus("Refresh needs loader.lua", COLOR_RED)
-            return
-        end
-        setStatus("Checking GitHub...")
-        local ok, msg = refresh()
-        if not ok then
-            setStatus(msg, COLOR_RED)
-        elseif msg ~= "Updated" then
-            setStatus(msg, COLOR_DIM)
-        end
-    end)
-end
-
 local function setToggleVisual(stroke, on)
-    stroke:SetAttribute("On", on and true or false)
-    local container = stroke.Parent
-    local accent = container and container:FindFirstChild("Accent")
-    local label = container and container:FindFirstChildOfClass("TextButton")
-    TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = on and 0.4 or 1 }):Play()
-    if accent then
-        TweenService:Create(accent, TweenInfo.new(0.2), { BackgroundTransparency = on and 0 or 1 }):Play()
-    end
-    if label then
-        TweenService:Create(label, TweenInfo.new(0.2), {
-            TextColor3 = on and Color3.fromRGB(5, 180, 130) or Color3.fromRGB(190, 190, 190)
-        }):Play()
-    end
+    TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = on and 0 or 0.5 }):Play()
 end
 
--- module row (Vape style): dark row, colored accent bar when on, teal text when on
 local function makeButton(parent, text, yPos, bgColor)
     local container = Instance.new("Frame")
-    container.Size = UDim2.new(1, -12, 0, 40)
-    container.Position = UDim2.new(0, 6, 0, yPos)
-    container.BackgroundColor3 = Color3.fromRGB(26, 25, 26)
+    container.Size = UDim2.new(1, 0, 0, 44)
+    container.Position = UDim2.new(0, 0, 0, yPos)
+    container.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
+    container.BackgroundTransparency = 0.2
     container.BorderSizePixel = 0
     container.ZIndex = 3
     container.Parent = parent
-    corner(container, 4)
+    corner(container, 8)
 
     local stroke = Instance.new("UIStroke")
     stroke.Color = bgColor
-    stroke.Thickness = 1
-    stroke.Transparency = 1
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.5
     stroke.Parent = container
-    stroke:SetAttribute("Label", text)
-    stroke:SetAttribute("On", false)
 
-    local accent = Instance.new("Frame")
-    accent.Name = "Accent"
-    accent.Size = UDim2.new(0, 3, 1, 0)
-    accent.BackgroundColor3 = bgColor
-    accent.BackgroundTransparency = 1
-    accent.BorderSizePixel = 0
-    accent.ZIndex = 4
-    accent.Parent = container
+    local colorBar = Instance.new("Frame")
+    colorBar.Size = UDim2.new(0, 3, 0.7, 0)
+    colorBar.Position = UDim2.new(0, 8, 0.15, 0)
+    colorBar.BackgroundColor3 = bgColor
+    colorBar.BorderSizePixel = 0
+    colorBar.ZIndex = 4
+    colorBar.Parent = container
+    corner(colorBar, 2)
 
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 1, 0)
     btn.BackgroundTransparency = 1
     btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(190, 190, 190)
-    btn.TextSize = 14
+    btn.TextColor3 = COLOR_TEXT
+    btn.TextScaled = true
     btn.Font = activeFont
     btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.ZIndex = 4
     btn.Parent = container
 
     local pad = Instance.new("UIPadding")
-    pad.PaddingLeft = UDim.new(0, 14)
+    pad.PaddingLeft = UDim.new(0, 20)
     pad.Parent = btn
 
     btn.MouseEnter:Connect(function()
-        TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(36, 35, 37) }):Play()
+        TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(34, 34, 52) }):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.12), { Transparency = 0 }):Play()
     end)
     btn.MouseLeave:Connect(function()
-        TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(26, 25, 26) }):Play()
+        TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(24, 24, 36) }):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.12), { Transparency = 0.5 }):Play()
+    end)
+    btn.MouseButton1Down:Connect(function()
+        TweenService:Create(container, TweenInfo.new(0.06), { BackgroundColor3 = bgColor }):Play()
+        if settings.animatedUI then
+            TweenService:Create(stroke, TweenInfo.new(0.06), { Thickness = 3.5 }):Play()
+        end
+    end)
+    getgenv().MM2HubClick(btn, "MouseButton1Up", function()
+        TweenService:Create(container, TweenInfo.new(0.12), { BackgroundColor3 = Color3.fromRGB(24, 24, 36) }):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.15), { Thickness = 1.5 }):Play()
     end)
 
     return btn, stroke
@@ -1592,6 +1521,121 @@ getgenv().MM2HubClick(reachBtn, "MouseButton1Click", function()
     end
 end)
 
+-- RESIZE: drag a corner grip to scale the whole window; ANIMATED UI breathes and spins the border
+do
+    if settings.windowH then
+        rgbBorder.Size = UDim2.new(0, 316, 0, settings.windowH)
+        mainFrame.Size = UDim2.new(0, 308, 0, settings.windowH - 8)
+    end
+
+    local resizing = false
+    local center0, d0, s0 = nil, 1, 1
+
+    local function makeGrip(ax, ay)
+        local g = Instance.new("TextButton")
+        g.Size = UDim2.new(0, 14, 0, 14)
+        g.Position = UDim2.new(ax, -7, ay, -7)
+        g.BackgroundColor3 = activeThemeDef.accent
+        g.BorderSizePixel = 0
+        g.AutoButtonColor = false
+        g.Text = ""
+        g.ZIndex = 20
+        g.Parent = rgbBorder
+        corner(g, 7)
+        g.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            resizing = true
+            rgbBorder.Draggable = false
+            center0 = rgbBorder.AbsolutePosition + rgbBorder.AbsoluteSize / 2
+            d0 = math.max(1, (UserInputService:GetMouseLocation() - center0).Magnitude)
+            s0 = uiScale.Scale
+        end)
+    end
+    -- bottom-right grip: stretches the window's length (height) only
+    local function makeLengthGrip()
+        local g = Instance.new("TextButton")
+        g.Size = UDim2.new(0, 14, 0, 14)
+        g.Position = UDim2.new(1, -7, 1, -7)
+        g.BackgroundColor3 = Color3.fromRGB(0, 200, 180)
+        g.BorderSizePixel = 0
+        g.AutoButtonColor = false
+        g.Text = ""
+        g.ZIndex = 20
+        g.Parent = rgbBorder
+        corner(g, 7)
+
+        local dragging, startY, startH = false, 0, 478
+        g.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            dragging = true
+            rgbBorder.Draggable = false
+            startY = UserInputService:GetMouseLocation().Y
+            startH = rgbBorder.Size.Y.Offset
+        end)
+        getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
+            if not dragging then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            local dy = (UserInputService:GetMouseLocation().Y - startY) / uiScale.Scale
+            local h = math.clamp(startH + dy, 380, 700)
+            rgbBorder.Size = UDim2.new(0, 316, 0, h)
+            mainFrame.Size = UDim2.new(0, 308, 0, h - 8)
+            settings.windowH = h
+        end)
+        getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
+            if not dragging then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            dragging = false
+            rgbBorder.Draggable = true
+            saveSettings()
+        end)
+    end
+
+    makeGrip(0, 0)
+    makeGrip(1, 0)
+    makeGrip(0, 1)
+    makeLengthGrip()
+
+    getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
+        if not resizing then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        local d = (UserInputService:GetMouseLocation() - center0).Magnitude
+        local s = math.clamp(s0 * d / d0, 0.6, 1.6)
+        settings.uiScale = s
+        uiScale.Scale = s
+    end)
+    getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
+        if not resizing then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        resizing = false
+        rgbBorder.Draggable = true
+        saveSettings()
+    end)
+
+    local t0 = os.clock()
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
+        if resizing then return end
+        local base = settings.uiScale or 1
+        if settings.animatedUI then
+            local t = os.clock() - t0
+            uiScale.Scale = base * (1 + 0.015 * math.sin(t * 2.5))
+            rgbGrad.Rotation = (t * 40) % 360
+        else
+            uiScale.Scale = base
+        end
+    end)
+end
 
 -- SHERIFF HITBOX EXPANDER: makes the murderer's hitbox bigger on your client.
 -- (The server decides hits, so the gun's own beam hitbox can't be changed from here.)
@@ -4312,88 +4356,68 @@ do
     end)
 end
 
-do -- SCRIPT VERSION module: when on, shows every version from 2.8 to 3.9
-    local LOG = {
-        { "3.9", "Vape V4 style windows, enabled-module list, Script Version module; removed resize, animated UI and 3D UI" },
-        { "3.8", "Boot checks (updates, syntax, broken buttons) with backup fallback; a broken button shuts itself down" },
-        { "3.7", "REFRESH button: checks GitHub and reloads only when the repo has changed" },
-        { "3.6", "Auto Aim range, line-of-sight and underground checks; Auto Shoot crosshair ring; aim fires through the Shoot remote" },
-        { "3.5", "no notes saved" },
-        { "3.4", "Apply Background plays the Animated.. link (giphy or .gif); Enter does too" },
-        { "3.3", "no notes saved" },
-        { "3.2", "no notes saved" },
-        { "3.1", "no notes saved" },
-        { "3.0", "no notes saved" },
-        { "2.9", "Fixed the 200-local crash by scoping reach, dodge, reaction and game code" },
-        { "2.8", "Tabbed build with seasonal themes and mini-games" },
-    }
-
-    local panel = Instance.new("Frame")
-    panel.Name = "VersionPanel"
-    panel.Size = UDim2.fromOffset(300, 400)
-    panel.Position = UDim2.new(0.5, -150, 0, 70)
-    panel.BackgroundColor3 = Color3.fromRGB(26, 25, 26)
-    panel.BorderSizePixel = 0
-    panel.Active = true
-    panel.Draggable = true
-    panel.Visible = false
-    panel.ZIndex = 20
-    panel.Parent = mainFrame
-    corner(panel, 6)
-
-    local head = Instance.new("TextLabel")
-    head.Size = UDim2.new(1, 0, 0, 40)
-    head.BackgroundColor3 = Color3.fromRGB(20, 20, 22)
-    head.BorderSizePixel = 0
-    head.Text = "Script Version  (2.8 - 3.9)"
-    head.TextColor3 = Color3.fromRGB(230, 230, 230)
-    head.TextSize = 15
-    head.Font = Enum.Font.GothamBold
-    head.TextXAlignment = Enum.TextXAlignment.Left
-    head.ZIndex = 21
-    head.Parent = panel
-    corner(head, 6)
-    local headPad = Instance.new("UIPadding")
-    headPad.PaddingLeft = UDim.new(0, 12)
-    headPad.Parent = head
-
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Position = UDim2.fromOffset(0, 44)
-    scroll.Size = UDim2.new(1, 0, 1, -48)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 3
-    scroll.CanvasSize = UDim2.new(0, 0, 0, #LOG * 62 + 8)
-    scroll.ZIndex = 21
-    scroll.Parent = panel
-
-    for idx, entry in ipairs(LOG) do
-        local row = Instance.new("TextLabel")
-        row.Size = UDim2.new(1, -16, 0, 56)
-        row.Position = UDim2.fromOffset(8, 4 + (idx - 1) * 62)
-        row.BackgroundColor3 = Color3.fromRGB(34, 33, 35)
-        row.BorderSizePixel = 0
-        row.Text = "  v" .. entry[1] .. "\n  " .. entry[2]
-        row.TextColor3 = Color3.fromRGB(200, 200, 200)
-        row.TextSize = 12
-        row.TextWrapped = true
-        row.Font = activeFont
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.TextYAlignment = Enum.TextYAlignment.Center
-        row.ZIndex = 22
-        row.Parent = scroll
-        corner(row, 4)
-    end
-
-    local verBtn, verStroke = makeButton(settingsPage, "📜 SCRIPT VERSION", 402, Color3.fromRGB(120, 200, 255))
-    getgenv().MM2HubClick(verBtn, "MouseButton1Up", function()
-        local on = not verStroke:GetAttribute("On")
-        setToggleVisual(verStroke, on)
-        panel.Visible = on
-        setStatus(on and "Script Version: showing 2.8 - 3.9" or "Script Version hidden", COLOR_GREEN)
+do -- ANIMATED UI toggle
+    local animBtn, animStroke = makeButton(settingsPage, "✨ ANIMATED UI", 402, Color3.fromRGB(0, 200, 180))
+    setToggleVisual(animStroke, settings.animatedUI == true)
+    getgenv().MM2HubClick(animBtn, "MouseButton1Click", function()
+        settings.animatedUI = not settings.animatedUI
+        setToggleVisual(animStroke, settings.animatedUI)
+        saveSettings()
+        setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
     end)
+    if settingsPage:IsA("ScrollingFrame") then
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 800)
+    end
 end
 
+do -- 3D UI toggle: parallax window with a drop shadow and a glossy edge
+    local btn3d, stroke3d = makeButton(settingsPage, "🧊 3D UI", 452, Color3.fromRGB(120, 200, 255))
+    setToggleVisual(stroke3d, settings.ui3d == true)
+
+    local shadow = Instance.new("Frame")
+    shadow.Name = "Shadow3D"
+    shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+    shadow.BackgroundTransparency = 0.45
+    shadow.BorderSizePixel = 0
+    shadow.ZIndex = 1
+    shadow.Visible = false
+    shadow.Parent = rgbBorder
+    corner(shadow, 12)
+
+    local gloss = Instance.new("UIStroke")
+    gloss.Color = Color3.new(1, 1, 1)
+    gloss.Thickness = 2
+    gloss.Transparency = 0.6
+    gloss.Enabled = false
+    gloss.Parent = mainFrame
+
+    getgenv().MM2HubBind(RunService.Heartbeat, function()
+        if not settings.ui3d then
+            shadow.Visible = false
+            gloss.Enabled = false
+            mainFrame.Position = UDim2.new(0, 4, 0, 4)
+            return
+        end
+        shadow.Visible = true
+        gloss.Enabled = true
+        local mouse = UserInputService:GetMouseLocation()
+        local half = rgbBorder.AbsoluteSize / 2
+        local center = rgbBorder.AbsolutePosition + half
+        local dx = math.clamp((mouse.X - center.X) / math.max(1, half.X), -1, 1)
+        local dy = math.clamp((mouse.Y - center.Y) / math.max(1, half.Y), -1, 1)
+        local ox, oy = -dx * 6, -dy * 6
+        mainFrame.Position = UDim2.new(0, 4 + ox, 0, 4 + oy)
+        shadow.Position = UDim2.new(0, 4 + ox + 8, 0, 4 + oy + 10)
+        shadow.Size = mainFrame.Size
+    end)
+
+    getgenv().MM2HubClick(btn3d, "MouseButton1Click", function()
+        settings.ui3d = not settings.ui3d
+        saveSettings()
+        setToggleVisual(stroke3d, settings.ui3d)
+        setStatus(settings.ui3d and "3D UI on" or "3D UI off", COLOR_GREEN)
+    end)
+end
 
 local themeBtn = makeButton(settingsPage, "🎨 THEME", 252, Color3.fromRGB(255, 120, 0))
 local fontBtn = makeButton(settingsPage, "🔤 FONT", 302, Color3.fromRGB(180, 80, 255))
@@ -4510,6 +4534,7 @@ setTab("ESP")
 if loadingFinish then
     loadingFinish(function()
         rgbBorder.Visible = true
+        getgenv().MM2HubShown = true
     end)
 end
 
@@ -4521,6 +4546,111 @@ do
             env.MM2HubBg.start(bgImage)
         end)
     end
+end
+
+-- SETTINGS: main GUI key, version changer, refresh (one block, no new top-level locals)
+do
+    settings.toggleKey = settings.toggleKey or "RightShift"
+
+    local function keyFromName(text)
+        local want = string.lower((tostring(text or ""):gsub("%s", "")))
+        for _, item in ipairs(Enum.KeyCode:GetEnumItems()) do
+            if string.lower(item.Name) == want then return item end
+        end
+        return nil
+    end
+
+    local function settingLabel(text, y)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, 0, 0, 16)
+        l.Position = UDim2.new(0, 0, 0, y)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = COLOR_DIM
+        l.TextScaled = true
+        l.Font = activeFont
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.ZIndex = 3
+        l.Parent = settingsPage
+        return l
+    end
+
+    local function settingBox(placeholder, text, y)
+        local b = Instance.new("TextBox")
+        b.Size = UDim2.new(1, 0, 0, 32)
+        b.Position = UDim2.new(0, 0, 0, y)
+        b.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+        b.BorderSizePixel = 0
+        b.Text = text
+        b.PlaceholderText = placeholder
+        b.TextColor3 = COLOR_TEXT
+        b.PlaceholderColor3 = Color3.fromRGB(90, 90, 120)
+        b.TextScaled = true
+        b.ClearTextOnFocus = false
+        b.Font = activeFont
+        b.ZIndex = 3
+        b.Parent = settingsPage
+        corner(b, 6)
+        return b
+    end
+
+    -- MAIN GUI KEY: type a key name, then press Enter or click away
+    settingLabel("MAIN GUI KEY (hides / shows the window)", 500)
+    local keyBox = settingBox("e.g. RightShift, F, Insert", settings.toggleKey, 518)
+    keyBox.FocusLost:Connect(function()
+        local key = keyFromName(keyBox.Text)
+        if key then
+            settings.toggleKey = key.Name
+            saveSettings()
+            keyBox.Text = key.Name
+            setStatus("Main GUI key: " .. key.Name, COLOR_GREEN)
+        else
+            keyBox.Text = settings.toggleKey
+            setStatus("Unknown key name", COLOR_RED)
+        end
+    end)
+    getgenv().MM2HubBind(UserInputService.InputBegan, function(input, gp)
+        if gp or not getgenv().MM2HubShown then return end
+        if input.KeyCode.Name == settings.toggleKey then
+            rgbBorder.Visible = not rgbBorder.Visible
+        end
+    end)
+
+    -- SCRIPT VERSION: older copies come from the repo's versions/ folder
+    settingLabel("SCRIPT VERSION (type 2.8, 3.4 ... or current)", 572)
+    local verBox = settingBox("e.g. 2.8 or current", "", 590)
+    local loadVerBtn = makeButton(settingsPage, "📂 LOAD VERSION", 630, Color3.fromRGB(120, 200, 255))
+    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.8)", 680, COLOR_GOLD)
+
+    local function loadVersion(text)
+        local switch = getgenv().MM2HubSwitch
+        if not switch then
+            setStatus("Version changer needs loader.lua", COLOR_RED)
+            return
+        end
+        setStatus("Loading " .. tostring(text) .. "...", COLOR_DIM)
+        local ok, msg = switch(text)
+        if not ok then setStatus(msg, COLOR_RED) end
+    end
+    getgenv().MM2HubClick(loadVerBtn, "MouseButton1Up", function() loadVersion(verBox.Text) end)
+    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.8") end)
+
+    -- REFRESH: checks GitHub, reloads only when the repo changed
+    local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 730, COLOR_GREEN)
+    getgenv().MM2HubClick(refreshBtn, "MouseButton1Up", function()
+        local refresh = getgenv().MM2HubRefresh
+        if not refresh then
+            setStatus("Refresh needs loader.lua", COLOR_RED)
+            return
+        end
+        setStatus("Checking GitHub...", COLOR_DIM)
+        local ok, msg = refresh()
+        if not ok then
+            setStatus(msg, COLOR_RED)
+        elseif msg ~= "Updated" then
+            setStatus(msg, COLOR_DIM)
+        end
+    end)
 end
 
 if getgenv().MM2HubNotice then
