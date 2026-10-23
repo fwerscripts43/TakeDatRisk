@@ -1,4 +1,4 @@
--- MM2 Helper v3.4 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.6 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -315,7 +315,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.4"
+versionBadge.Text = "v3.6"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -999,6 +999,21 @@ local function aimFire(pos)
     end
 end
 
+-- a shot is only allowed when the target is close enough, above you, and not behind a wall
+local function clearShotAt(tChar, tPos)
+    local myChar = player.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not tChar then return false end
+    local origin = camera.CFrame.Position
+    local offset = tPos - origin
+    if offset.Magnitude > (settings.aimRange or 90) then return false end
+    if tPos.Y < myRoot.Position.Y - 6 then return false end -- underground / far below you
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { myChar, tChar }
+    return workspace:Raycast(origin, offset, params) == nil
+end
+
 local function aimStep(dt)
     if not aimEnabled then return end
     if aimMode == "MURD" then
@@ -1032,7 +1047,9 @@ local function aimStep(dt)
         aimShotTimer = aimShotTimer + dt
         if aimShotTimer >= 0.15 then
             aimShotTimer = 0
-            aimFire(aimPos)
+            if clearShotAt(tChar, part.Position) then
+                aimFire(aimPos)
+            end
         end
     end
 end
@@ -1134,68 +1151,49 @@ Players.PlayerAdded:Connect(updatePlayerList)
 Players.PlayerRemoving:Connect(updatePlayerList)
 updatePlayerList()
 
--- AUTO SHOOT (snippet logic)
+-- AUTO SHOOT: a ring around the crosshair. When the murderer is inside the ring, in clear
+-- line of sight, it fires at their predicted position (the ring turns green).
 local autoShootOn = false
 local shootLoopRunning = false
 
-local function autoShootStep()
+local function autoShootStep(canFire)
+    local ringGui = playerGui:FindFirstChild("MM2Hub_ShootRing")
+    local ring = ringGui and ringGui:FindFirstChild("Ring")
+    local stroke = ring and ring:FindFirstChildOfClass("UIStroke")
+    local center = camera.ViewportSize / 2
+    if ring then
+        ring.Position = UDim2.fromOffset(center.X, center.Y)
+    end
+
     local char = player.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not hum or not root then return end
-
-    local murderer = findMurderer() or findSheriffThatsNotMe()
-    if not murderer then
-        setStatus("MM2 Autoshoot - No murderer.")
+    if not root or not hasLocalGun() then
+        if stroke then stroke.Color = COLOR_DIM end
         return
     end
 
-    local murdererHRP = murderer.Character and murderer.Character:FindFirstChild("HumanoidRootPart")
-    if not murdererHRP then return end
-
-    local delta = murdererHRP.Position - root.Position
-    if delta.Magnitude < 0.1 then return end
-
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = { char }
-    local hit = workspace:Raycast(root.Position, delta.Unit * 50, rayParams)
-
-    if hit and hit.Instance.Parent ~= murderer.Character then
+    local murderer = findMurderer()
+    local tChar = murderer and murderer.Character
+    local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+    local head = tChar and tChar:FindFirstChild("Head")
+    if not tRoot or not head or isDead(murderer) then
+        if stroke then stroke.Color = COLOR_DIM end
         return
     end
 
-    local gun = char:FindFirstChild("Gun")
-    if not gun then
-        local backpackGun = player.Backpack:FindFirstChild("Gun")
-        if not backpackGun then
-            setStatus("You don't have the gun..?", COLOR_RED)
-            return
-        end
-        hum:EquipTool(backpackGun)
-        task.wait(0.1)
-        gun = char:FindFirstChild("Gun")
-        if not gun then return end
+    local screenPos = camera:WorldToViewportPoint(head.Position)
+    local radius = settings.shootRing or 110
+    local inside = screenPos.Z > 0 and (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude <= radius
+    if stroke then
+        stroke.Color = inside and COLOR_GREEN or COLOR_RED
     end
+    if not inside or not clearShotAt(tChar, head.Position) then return end
 
-    local remote = gun:FindFirstChild("KnifeLocal")
-        and gun.KnifeLocal:FindFirstChild("CreateBeam")
-        and gun.KnifeLocal.CreateBeam:FindFirstChild("RemoteFunction")
-    if not remote then
-        setStatus("Shoot remote not found on the Gun.", COLOR_RED)
-        return
-    end
-
-    local predictedPosition = murdererHRP.Position
-        + (murdererHRP.AssemblyLinearVelocity * Vector3.new(1, 0.5, 1)) * (SHOOT_OFFSET / 15)
-
-    local ok, err = pcall(function()
-        remote:InvokeServer(1, predictedPosition, "AH2")
-    end)
-    if ok then
-        setStatus("Auto-shooting " .. murderer.DisplayName, COLOR_BLUE)
-    else
-        setStatus("Shoot failed: " .. tostring(err), COLOR_RED)
+    if canFire then
+        local dist = (head.Position - camera.CFrame.Position).Magnitude
+        local predicted = head.Position + tRoot.AssemblyLinearVelocity * (dist / BULLET_SPEED)
+        aimFire(predicted)
+        setStatus("🎯 Auto shooting " .. murderer.DisplayName, COLOR_BLUE)
     end
 end
 
@@ -1203,11 +1201,17 @@ local function startAutoShootLoop()
     if shootLoopRunning then return end
     shootLoopRunning = true
     task.spawn(function()
+        local shotTimer = 0
         while autoShootOn do
-            task.wait(0.1)
-            if hasLocalGun() then
-                local ok, err = pcall(autoShootStep)
-                if not ok then warn("[MM2 AutoShoot] " .. tostring(err)) end
+            local dt = task.wait()
+            shotTimer = shotTimer + dt
+            local canFire = shotTimer >= 0.15
+            if canFire then
+                shotTimer = 0
+            end
+            local ok, err = pcall(autoShootStep, canFire)
+            if not ok then
+                warn("[MM2 AutoShoot] " .. tostring(err))
             end
         end
         shootLoopRunning = false
@@ -1223,10 +1227,37 @@ autoShootBtn.MouseButton1Click:Connect(function()
         autoShootOn = true
         autoShootBtn.Text = "🎯 STOP AUTO SHOOT"
         setToggleVisual(autoShootStroke, true)
-        setStatus("AUTO SHOOT ON", COLOR_BLUE)
+
+        -- the crosshair ring (IgnoreGuiInset so it lines up with the screen center)
+        local g = Instance.new("ScreenGui")
+        g.Name = "MM2Hub_ShootRing"
+        g.ResetOnSpawn = false
+        g.IgnoreGuiInset = true
+        g.DisplayOrder = 60
+        g.Parent = playerGui
+        local radius = settings.shootRing or 110
+        local ring = Instance.new("Frame")
+        ring.Name = "Ring"
+        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+        ring.Size = UDim2.fromOffset(radius * 2, radius * 2)
+        ring.BackgroundTransparency = 1
+        ring.Parent = g
+        local rc = Instance.new("UICorner")
+        rc.CornerRadius = UDim.new(1, 0)
+        rc.Parent = ring
+        local rs = Instance.new("UIStroke")
+        rs.Color = COLOR_RED
+        rs.Thickness = 2
+        rs.Parent = ring
+
+        setStatus("AUTO SHOOT ON: get the murderer inside the ring", COLOR_BLUE)
         startAutoShootLoop()
     else
         autoShootOn = false
+        local old = playerGui:FindFirstChild("MM2Hub_ShootRing")
+        if old then
+            old:Destroy()
+        end
         autoShootBtn.Text = "🎯 AUTO SHOOT"
         setToggleVisual(autoShootStroke, false)
         setStatus("AUTO SHOOT OFF")
@@ -1449,6 +1480,11 @@ end)
 
 -- RESIZE: drag a corner grip to scale the whole window; ANIMATED UI breathes and spins the border
 do
+    if settings.windowH then
+        rgbBorder.Size = UDim2.new(0, 316, 0, settings.windowH)
+        mainFrame.Size = UDim2.new(0, 308, 0, settings.windowH - 8)
+    end
+
     local resizing = false
     local center0, d0, s0 = nil, 1, 1
 
@@ -1474,10 +1510,55 @@ do
             s0 = uiScale.Scale
         end)
     end
+    -- bottom-right grip: stretches the window's length (height) only
+    local function makeLengthGrip()
+        local g = Instance.new("TextButton")
+        g.Size = UDim2.new(0, 14, 0, 14)
+        g.Position = UDim2.new(1, -7, 1, -7)
+        g.BackgroundColor3 = Color3.fromRGB(0, 200, 180)
+        g.BorderSizePixel = 0
+        g.AutoButtonColor = false
+        g.Text = ""
+        g.ZIndex = 20
+        g.Parent = rgbBorder
+        corner(g, 7)
+
+        local dragging, startY, startH = false, 0, 478
+        g.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            dragging = true
+            rgbBorder.Draggable = false
+            startY = UserInputService:GetMouseLocation().Y
+            startH = rgbBorder.Size.Y.Offset
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            local dy = (UserInputService:GetMouseLocation().Y - startY) / uiScale.Scale
+            local h = math.clamp(startH + dy, 380, 700)
+            rgbBorder.Size = UDim2.new(0, 316, 0, h)
+            mainFrame.Size = UDim2.new(0, 308, 0, h - 8)
+            settings.windowH = h
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            dragging = false
+            rgbBorder.Draggable = true
+            saveSettings()
+        end)
+    end
+
     makeGrip(0, 0)
     makeGrip(1, 0)
     makeGrip(0, 1)
-    makeGrip(1, 1)
+    makeLengthGrip()
 
     UserInputService.InputChanged:Connect(function(input)
         if not resizing then return end
@@ -1984,7 +2065,7 @@ end
 
 local function tweenToCoin(root, coin)
     local dist = (coin.Position - root.Position).Magnitude
-    local duration = math.max(0.05, dist / COIN_SPEED)
+    local duration = math.max(0.05, dist / (settings.coinSpeed or COIN_SPEED))
     local tween = TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
         CFrame = CFrame.new(coin.Position + Vector3.new(0, 3, 0)),
     })
@@ -2049,7 +2130,7 @@ local function autoCoinLoop()
                 tweenToCoin(root, coin)
 
                 local t = 0
-                while not fired and coin.Parent and t < COIN_TIMEOUT and autoCoinOn do
+                while settings.coinWait ~= false and not fired and coin.Parent and t < COIN_TIMEOUT and autoCoinOn do
                     task.wait(0.1)
                     t = t + 0.1
                 end
@@ -2069,21 +2150,319 @@ local function autoCoinLoop()
     coinRunning = false
 end
 
-autoCoinBtn.MouseButton1Click:Connect(function()
-    autoCoinOn = not autoCoinOn
-    if autoCoinOn then
-        autoCoinBtn.Text = "🪙 STOP AUTO COIN"
-        setToggleVisual(autoCoinStroke, true)
-        if not coinRunning then
-            coinRunning = true
-            task.spawn(autoCoinLoop)
+-- AUTO COIN: tap/click toggles it on PC; right-click (or tap on mobile) opens the settings panel
+do
+    local function toggleCoin()
+        autoCoinOn = not autoCoinOn
+        if autoCoinOn then
+            autoCoinBtn.Text = "🪙 STOP AUTO COIN"
+            setToggleVisual(autoCoinStroke, true)
+            if not coinRunning then
+                coinRunning = true
+                task.spawn(autoCoinLoop)
+            end
+        else
+            autoCoinBtn.Text = "🪙 AUTO COIN"
+            setToggleVisual(autoCoinStroke, false)
+            setStatus("AUTO COIN OFF")
         end
-    else
-        autoCoinBtn.Text = "🪙 AUTO COIN"
-        setToggleVisual(autoCoinStroke, false)
-        setStatus("AUTO COIN OFF")
     end
-end)
+
+    local COIN_MIN, COIN_MAX = 20, 200
+    local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(0, 170, 0, 250)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+    panel.BorderSizePixel = 0
+    panel.Visible = false
+    panel.ZIndex = 5
+    panel.Parent = screenGui
+    corner(panel, 12)
+    local pst = Instance.new("UIStroke")
+    pst.Color = activeThemeDef.accent
+    pst.Thickness = 2
+    pst.Parent = panel
+
+    local function plabel(y, text)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1, -20, 0, 24)
+        l.Position = UDim2.new(0, 10, 0, y)
+        l.BackgroundTransparency = 1
+        l.Text = text
+        l.TextColor3 = COLOR_TEXT
+        l.TextScaled = true
+        l.Font = activeFont
+        l.ZIndex = 6
+        l.Parent = panel
+        return l
+    end
+    local function pbtn(y, text, color)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, 140, 0, 32)
+        b.Position = UDim2.new(0, 15, 0, y)
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextScaled = true
+        b.Font = activeFont
+        b.ZIndex = 6
+        b.Parent = panel
+        corner(b, 8)
+        return b
+    end
+
+    plabel(8, "AUTO COIN")
+    local valueLbl = plabel(40, "")
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, -40, 0, 8)
+    track.Position = UDim2.new(0, 20, 0, 76)
+    track.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+    track.BorderSizePixel = 0
+    track.ZIndex = 6
+    track.Parent = panel
+    corner(track, 4)
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = activeThemeDef.accent
+    fill.BorderSizePixel = 0
+    fill.ZIndex = 7
+    fill.Parent = track
+    corner(fill, 4)
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new(0, 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    knob.BorderSizePixel = 0
+    knob.AutoButtonColor = false
+    knob.Text = ""
+    knob.ZIndex = 8
+    knob.Parent = track
+    corner(knob, 9)
+
+    local function setCoinSpeed(v)
+        local value = math.clamp(math.floor(v + 0.5), COIN_MIN, COIN_MAX)
+        settings.coinSpeed = value
+        local frac = (value - COIN_MIN) / (COIN_MAX - COIN_MIN)
+        fill.Size = UDim2.new(frac, 0, 1, 0)
+        knob.Position = UDim2.new(frac, 0, 0.5, 0)
+        valueLbl.Text = "Speed: " .. value
+    end
+
+    local dragging = false
+    local function speedFromX(x)
+        local rel = (x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X)
+        setCoinSpeed(COIN_MIN + math.clamp(rel, 0, 1) * (COIN_MAX - COIN_MIN))
+    end
+    local function beginDrag(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        dragging = true
+        rgbBorder.Draggable = false
+        speedFromX(input.Position.X)
+    end
+    track.InputBegan:Connect(beginDrag)
+    knob.InputBegan:Connect(beginDrag)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            speedFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            rgbBorder.Draggable = true
+            saveSettings()
+        end
+    end)
+
+    local onOffBtn = pbtn(122, "START", activeThemeDef.accent)
+    local waitBtn = pbtn(164, "WAIT: ON", Color3.fromRGB(40, 40, 60))
+    local doneBtn = pbtn(206, "DONE", Color3.fromRGB(24, 24, 36))
+
+    local function refresh()
+        onOffBtn.Text = autoCoinOn and "STOP" or "START"
+        waitBtn.Text = "WAIT: " .. (settings.coinWait ~= false and "ON" or "OFF")
+        setCoinSpeed(settings.coinSpeed or COIN_SPEED)
+    end
+
+    local progress, isOpen = 0, false
+    RunService.RenderStepped:Connect(function(dt)
+        if not isOpen and progress <= 0 then
+            panel.Visible = false
+            return
+        end
+        local goal = isOpen and 1 or 0
+        if progress < goal then
+            progress = math.min(goal, progress + dt * 4)
+        elseif progress > goal then
+            progress = math.max(goal, progress - dt * 4)
+        end
+        local eased = 1 - (1 - progress) ^ 3
+        local x = rgbBorder.AbsolutePosition.X
+        local w = rgbBorder.AbsoluteSize.X
+        local y = rgbBorder.AbsolutePosition.Y + 40
+        local hiddenX = x + w - 24
+        local shownX = x + w + 8
+        panel.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
+        panel.Visible = true
+    end)
+
+    local function openPanel()
+        isOpen = true
+        refresh()
+    end
+
+    autoCoinBtn.MouseButton1Click:Connect(function()
+        if isMobile then
+            openPanel()
+        else
+            toggleCoin()
+        end
+        refresh()
+    end)
+    autoCoinBtn.MouseButton2Click:Connect(openPanel)
+    onOffBtn.MouseButton1Click:Connect(function()
+        toggleCoin()
+        refresh()
+    end)
+    waitBtn.MouseButton1Click:Connect(function()
+        settings.coinWait = not (settings.coinWait ~= false)
+        saveSettings()
+        refresh()
+    end)
+    doneBtn.MouseButton1Click:Connect(function()
+        isOpen = false
+        saveSettings()
+    end)
+end
+
+-- NO ANIM: stops every animation on your character (toggle)
+do
+    local on = settings.noAnim == true
+    local noAnimBtn, noAnimStroke = makeButton(playerPage, "🚫 NO ANIM", 200, Color3.fromRGB(255, 90, 90))
+    setToggleVisual(noAnimStroke, on)
+
+    local function setAnimateDisabled(char, value)
+        local animate = char and char:FindFirstChild("Animate")
+        if animate and animate:IsA("LocalScript") then
+            animate.Disabled = value
+        end
+    end
+
+    RunService.Heartbeat:Connect(function()
+        if not on then return end
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local animator = hum and hum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                track:Stop(0)
+            end
+        end
+        setAnimateDisabled(char, true)
+    end)
+
+    noAnimBtn.MouseButton1Click:Connect(function()
+        on = not on
+        settings.noAnim = on
+        saveSettings()
+        setToggleVisual(noAnimStroke, on)
+        if not on then
+            setAnimateDisabled(player.Character, false)
+        end
+        setStatus(on and "No Anim ON" or "No Anim OFF", on and COLOR_RED or COLOR_DIM)
+    end)
+end
+
+-- OPTIMIZER: removes textures and materials from the world (toggle, restores on off)
+do
+    local on = settings.optimizer == true
+    local optBtn, optStroke = makeButton(playerPage, "⚙ OPTIMIZER", 250, Color3.fromRGB(120, 255, 160))
+    setToggleVisual(optStroke, on)
+
+    local saved = {} -- object -> original values
+
+    local function strip(o)
+        if saved[o] ~= nil then return end
+        if o:IsA("BasePart") then
+            local v = { kind = "part", material = o.Material }
+            o.Material = Enum.Material.SmoothPlastic
+            if o:IsA("MeshPart") then
+                v.texture = o.TextureID
+                o.TextureID = ""
+            end
+            saved[o] = v
+        elseif o:IsA("Decal") or o:IsA("Texture") then
+            saved[o] = { kind = "decal", transparency = o.Transparency }
+            o.Transparency = 1
+        elseif o:IsA("SpecialMesh") then
+            saved[o] = { kind = "mesh", texture = o.TextureId }
+            o.TextureId = ""
+        elseif o:IsA("SurfaceAppearance") then
+            saved[o] = { kind = "parent", parent = o.Parent }
+            o.Parent = nil
+        end
+    end
+
+    local function restoreAll()
+        for o, v in pairs(saved) do
+            pcall(function()
+                if v.kind == "part" then
+                    o.Material = v.material
+                    if v.texture then o.TextureID = v.texture end
+                elseif v.kind == "decal" then
+                    o.Transparency = v.transparency
+                elseif v.kind == "mesh" then
+                    o.TextureId = v.texture
+                elseif v.kind == "parent" then
+                    o.Parent = v.parent
+                end
+            end)
+            saved[o] = nil
+        end
+    end
+
+    local function applyAll()
+        local count = 0
+        for _, o in ipairs(workspace:GetDescendants()) do
+            pcall(strip, o)
+            count = count + 1
+            if count % 400 == 0 then
+                task.wait()
+            end
+        end
+    end
+
+    workspace.DescendantAdded:Connect(function(o)
+        if on then
+            pcall(strip, o)
+        end
+    end)
+
+    optBtn.MouseButton1Click:Connect(function()
+        on = not on
+        settings.optimizer = on
+        saveSettings()
+        setToggleVisual(optStroke, on)
+        if on then
+            task.spawn(applyAll)
+            setStatus("⚙ Optimizer ON: textures and materials removed", COLOR_GREEN)
+        else
+            restoreAll()
+            setStatus("Optimizer OFF: textures restored")
+        end
+    end)
+
+    if on then
+        task.spawn(applyAll)
+    end
+end
 
 -- INVIS (camera can be moved with the mouse while invisible)
 local invisActive = false
@@ -2958,8 +3337,15 @@ do
         frame.Position = UDim2.new(0.5, -math.floor(w / 2), 0.5, -math.floor(h / 2))
         frame.BackgroundColor3 = Color3.fromRGB(14, 14, 22)
         frame.BorderSizePixel = 0
+        frame.Active = true
+        frame.Draggable = true
         frame.Parent = gui
-        corner(frame, 12)
+        corner(frame, 14)
+
+        local grad = Instance.new("UIGradient")
+        grad.Color = ColorSequence.new(Color3.fromRGB(34, 24, 56), Color3.fromRGB(12, 12, 18))
+        grad.Rotation = 90
+        grad.Parent = frame
 
         local stroke = Instance.new("UIStroke")
         stroke.Color = activeThemeDef.accent
@@ -3001,6 +3387,47 @@ do
         score.TextScaled = true
         score.Font = activeFont
         score.Parent = frame
+
+        -- bottom-right grip: resize width and height (drag the title bar to move)
+        local grip = Instance.new("TextButton")
+        grip.Size = UDim2.new(0, 16, 0, 16)
+        grip.AnchorPoint = Vector2.new(1, 1)
+        grip.Position = UDim2.new(1, -4, 1, -4)
+        grip.BackgroundColor3 = activeThemeDef.accent
+        grip.BorderSizePixel = 0
+        grip.AutoButtonColor = false
+        grip.Text = ""
+        grip.ZIndex = 10
+        grip.Parent = frame
+        corner(grip, 5)
+
+        local resizing, sMouse, sW, sH = false, Vector2.new(), w, h
+        grip.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true
+                frame.Draggable = false
+                sMouse = UserInputService:GetMouseLocation()
+                sW, sH = frame.AbsoluteSize.X, frame.AbsoluteSize.Y
+            end
+        end)
+        local c1 = UserInputService.InputChanged:Connect(function(input)
+            if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local m = UserInputService:GetMouseLocation()
+                local nw = math.clamp(sW + (m.X - sMouse.X), 240, 700)
+                local nh = math.clamp(sH + (m.Y - sMouse.Y), 220, 700)
+                frame.Size = UDim2.new(0, nw, 0, nh)
+            end
+        end)
+        local c2 = UserInputService.InputEnded:Connect(function(input)
+            if resizing and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                resizing = false
+                frame.Draggable = true
+            end
+        end)
+        gui.Destroying:Connect(function()
+            c1:Disconnect()
+            c2:Disconnect()
+        end)
 
         return gui, frame, score
     end
@@ -3379,6 +3806,248 @@ do
             gui:Destroy()
         end
     end
+    -- BUBBLE POP: bubbles float up, click them before they escape
+    GAMES.BUBBLE = function()
+        local gui, frame, scoreLbl = gameWindow("🫧 BUBBLE POP", 320, 380)
+        local field = Instance.new("Frame")
+        field.Size = UDim2.new(0, 296, 0, 290)
+        field.Position = UDim2.new(0, 12, 0, 74)
+        field.BackgroundColor3 = Color3.fromRGB(8, 14, 26)
+        field.BorderSizePixel = 0
+        field.ClipsDescendants = true
+        field.Parent = frame
+        corner(field, 10)
+
+        local DURATION = 30
+        local score, alive, spawnAcc = 0, true, 0
+        local bubbles = {}
+        local startT = os.clock()
+
+        local function spawn()
+            local size = math.random(34, 56)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(0, size, 0, size)
+            b.Position = UDim2.new(0, math.random(0, 296 - size), 0, 290)
+            b.BackgroundColor3 = Color3.fromHSV(math.random(), 0.55, 1)
+            b.BackgroundTransparency = 0.1
+            b.AutoButtonColor = false
+            b.Text = ""
+            b.Parent = field
+            corner(b, math.floor(size / 2))
+            local bb = { ui = b, y = 290, speed = math.random(40, 80) + score }
+            table.insert(bubbles, bb)
+            b.MouseButton1Click:Connect(function()
+                if not alive or not b.Parent then return end
+                score = score + 1
+                b:Destroy()
+            end)
+        end
+
+        local conn
+        conn = RunService.Heartbeat:Connect(function(dt)
+            if not alive then return end
+            local left = DURATION - (os.clock() - startT)
+            if left <= 0 then
+                alive = false
+                scoreLbl.Text = "Time's up! Score: " .. score .. "  (X to leave)"
+                setStatus("🫧 Bubble Pop score: " .. score, COLOR_GOLD)
+                return
+            end
+            scoreLbl.Text = string.format("Score %d   |   %ds left", score, math.ceil(left))
+
+            spawnAcc = spawnAcc + dt
+            if spawnAcc >= math.max(0.25, 0.7 - score * 0.01) then
+                spawnAcc = 0
+                spawn()
+            end
+            for i = #bubbles, 1, -1 do
+                local bb = bubbles[i]
+                if bb.ui.Parent == nil then
+                    table.remove(bubbles, i)
+                else
+                    bb.y = bb.y - bb.speed * dt
+                    if bb.y < -60 then
+                        bb.ui:Destroy()
+                        table.remove(bubbles, i)
+                    else
+                        bb.ui.Position = UDim2.new(bb.ui.Position.X.Scale, bb.ui.Position.X.Offset, 0, bb.y)
+                    end
+                end
+            end
+        end)
+
+        return function()
+            alive = false
+            conn:Disconnect()
+            gui:Destroy()
+        end
+    end
+
+    -- MEMORY FLIP: find the 8 matching pairs
+    GAMES.MEMORY = function()
+        local gui, frame, scoreLbl = gameWindow("🃏 MEMORY FLIP", 320, 380)
+        local SYMBOLS = { "🎃", "👻", "🦇", "🍬", "🕷", "🧙", "💀", "🔮" }
+        local deck = {}
+        for _, sym in ipairs(SYMBOLS) do
+            table.insert(deck, sym)
+            table.insert(deck, sym)
+        end
+        for k = #deck, 2, -1 do
+            local j = math.random(1, k)
+            deck[k], deck[j] = deck[j], deck[k]
+        end
+
+        local cards = {}
+        local open, lock, matches, moves, alive = {}, false, 0, 0, true
+        local function update()
+            scoreLbl.Text = "Moves " .. moves .. "   |   Pairs " .. matches .. "/8"
+        end
+
+        for i = 1, 16 do
+            local col = (i - 1) % 4
+            local row = math.floor((i - 1) / 4)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(0, 64, 0, 64)
+            b.Position = UDim2.new(0, 12 + col * 74, 0, 74 + row * 74)
+            b.BackgroundColor3 = Color3.fromRGB(60, 40, 90)
+            b.BorderSizePixel = 0
+            b.AutoButtonColor = false
+            b.Text = "?"
+            b.TextScaled = true
+            b.TextColor3 = COLOR_TEXT
+            b.Font = activeFont
+            b.Parent = frame
+            corner(b, 10)
+            cards[i] = { ui = b, sym = deck[i], shown = false, done = false }
+
+            b.MouseButton1Click:Connect(function()
+                local card = cards[i]
+                if not alive or lock or card.shown or card.done then return end
+                card.shown = true
+                b.Text = card.sym
+                b.BackgroundColor3 = Color3.fromRGB(230, 200, 120)
+                table.insert(open, i)
+                if #open == 2 then
+                    moves = moves + 1
+                    local i1, i2 = open[1], open[2]
+                    local a, c = cards[i1], cards[i2]
+                    open = {}
+                    if a.sym == c.sym then
+                        a.done, c.done = true, true
+                        matches = matches + 1
+                        if matches == 8 then
+                            alive = false
+                            setStatus("🃏 Memory solved in " .. moves .. " moves!", COLOR_GOLD)
+                        end
+                    else
+                        lock = true
+                        task.delay(0.8, function()
+                            if alive then
+                                a.shown, c.shown = false, false
+                                a.ui.Text = "?"
+                                c.ui.Text = "?"
+                                a.ui.BackgroundColor3 = Color3.fromRGB(60, 40, 90)
+                                c.ui.BackgroundColor3 = Color3.fromRGB(60, 40, 90)
+                            end
+                            lock = false
+                        end)
+                    end
+                    update()
+                end
+            end)
+        end
+        update()
+
+        return function()
+            alive = false
+            gui:Destroy()
+        end
+    end
+
+    -- SLIDE PUZZLE: slide the tiles back into order (empty tile is the last one)
+    GAMES.PUZZLE = function()
+        local gui, frame, scoreLbl = gameWindow("🧩 SLIDE PUZZLE", 320, 380)
+        local grid = { 1, 2, 3, 4, 5, 6, 7, 8, 0 } -- 0 = empty
+
+        local function emptyIndex()
+            for k = 1, 9 do
+                if grid[k] == 0 then return k end
+            end
+        end
+        local function neighbors(k)
+            local r, c = math.floor((k - 1) / 3), (k - 1) % 3
+            local out = {}
+            if r > 0 then table.insert(out, k - 3) end
+            if r < 2 then table.insert(out, k + 3) end
+            if c > 0 then table.insert(out, k - 1) end
+            if c < 2 then table.insert(out, k + 1) end
+            return out
+        end
+
+        -- scramble with legal moves so the puzzle is always solvable
+        for _ = 1, 200 do
+            local e = emptyIndex()
+            local nb = neighbors(e)
+            local pick = nb[math.random(1, #nb)]
+            grid[e], grid[pick] = grid[pick], grid[e]
+        end
+
+        local tiles = {}
+        local moves, alive = 0, true
+        local function render()
+            for k = 1, 9 do
+                local v = grid[k]
+                tiles[k].Text = v ~= 0 and tostring(v) or ""
+                tiles[k].BackgroundColor3 = v ~= 0 and Color3.fromRGB(70, 60, 120) or Color3.fromRGB(14, 14, 22)
+            end
+            scoreLbl.Text = "Moves " .. moves
+        end
+
+        for k = 1, 9 do
+            local col = (k - 1) % 3
+            local row = math.floor((k - 1) / 3)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(0, 90, 0, 90)
+            b.Position = UDim2.new(0, 12 + col * 98, 0, 74 + row * 98)
+            b.BorderSizePixel = 0
+            b.AutoButtonColor = false
+            b.TextScaled = true
+            b.TextColor3 = COLOR_TEXT
+            b.Font = activeFont
+            b.Parent = frame
+            corner(b, 12)
+            tiles[k] = b
+
+            b.MouseButton1Click:Connect(function()
+                if not alive then return end
+                local e = emptyIndex()
+                local adjacent = false
+                for _, n in ipairs(neighbors(e)) do
+                    if n == k then adjacent = true end
+                end
+                if not adjacent then return end
+                grid[e], grid[k] = grid[k], grid[e]
+                moves = moves + 1
+                render()
+
+                local solved = true
+                for idx = 1, 8 do
+                    if grid[idx] ~= idx then solved = false end
+                end
+                if solved and grid[9] == 0 then
+                    alive = false
+                    scoreLbl.Text = "Solved in " .. moves .. " moves!  (X to leave)"
+                    setStatus("🧩 Puzzle solved in " .. moves .. " moves", COLOR_GOLD)
+                end
+            end)
+        end
+        render()
+
+        return function()
+            alive = false
+            gui:Destroy()
+        end
+    end
 end
 
 local function toggleGame(key)
@@ -3392,46 +4061,57 @@ end
 -- GAMES TAB
 do -- game menu: a card for each game
     local ENTRIES = {
-        { key = "STACK", name = "BLOCK STACK", desc = "Drop blocks onto the tower", color = COLOR_GOLD },
-        { key = "OBBY", name = "OBBY RUN", desc = "Climb the platforms", color = Color3.fromRGB(80, 220, 120) },
-        { key = "LOOT", name = "LOOT RUSH", desc = "Grab orbs before time runs out", color = Color3.fromRGB(180, 80, 255) },
-        { key = "DODGE", name = "DODGE", desc = "Survive the falling blocks", color = COLOR_RED },
-        { key = "REACTION", name = "REACTION TEST", desc = "How fast are your reflexes?", color = COLOR_BLUE },
-        { key = "TARGET", name = "TARGET RUSH", desc = "Click the floating 3D targets", color = Color3.fromRGB(80, 220, 255) },
-        { key = "SIMON", name = "SIMON PADS", desc = "Repeat the growing color pattern", color = Color3.fromRGB(255, 120, 0) },
-        { key = "WHACK", name = "WHACK-A-MOLE", desc = "Smash the moles, fast", color = Color3.fromRGB(150, 110, 60) },
-        { key = "COLOR", name = "COLOR MATCH", desc = "Click the ink color, not the word", color = Color3.fromRGB(255, 80, 180) },
+        { key = "STACK", icon = "🧱", name = "BLOCK STACK", desc = "Drop blocks onto the tower", color = COLOR_GOLD },
+        { key = "OBBY", icon = "🏃", name = "OBBY RUN", desc = "Climb the platforms", color = Color3.fromRGB(80, 220, 120) },
+        { key = "LOOT", icon = "💰", name = "LOOT RUSH", desc = "Grab orbs before time runs out", color = Color3.fromRGB(180, 80, 255) },
+        { key = "DODGE", icon = "☄", name = "DODGE", desc = "Survive the falling blocks", color = COLOR_RED },
+        { key = "REACTION", icon = "⚡", name = "REACTION TEST", desc = "How fast are your reflexes?", color = COLOR_BLUE },
+        { key = "TARGET", icon = "🎯", name = "TARGET RUSH", desc = "Click the floating 3D targets", color = Color3.fromRGB(80, 220, 255) },
+        { key = "SIMON", icon = "🟥", name = "SIMON PADS", desc = "Repeat the growing color pattern", color = Color3.fromRGB(255, 120, 0) },
+        { key = "WHACK", icon = "🐹", name = "WHACK-A-MOLE", desc = "Smash the moles, fast", color = Color3.fromRGB(150, 110, 60) },
+        { key = "COLOR", icon = "🎨", name = "COLOR MATCH", desc = "Click the ink color, not the word", color = Color3.fromRGB(255, 80, 180) },
+        { key = "BUBBLE", icon = "🫧", name = "BUBBLE POP", desc = "Pop the bubbles before they escape", color = Color3.fromRGB(90, 200, 255) },
+        { key = "MEMORY", icon = "🃏", name = "MEMORY FLIP", desc = "Find all 8 matching pairs", color = Color3.fromRGB(255, 170, 60) },
+        { key = "PUZZLE", icon = "🧩", name = "SLIDE PUZZLE", desc = "Slide the tiles back in order", color = Color3.fromRGB(160, 255, 120) },
     }
+    local CARD_H = 74
 
     for i, e in ipairs(ENTRIES) do
         local col = (i - 1) % 2
         local row = math.floor((i - 1) / 2)
         local card = Instance.new("TextButton")
-        card.Size = UDim2.new(0.5, -10, 0, 62)
-        card.Position = UDim2.new(col * 0.5, col == 0 and 6 or 4, 0, row * 70 + 6)
-        card.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
+        card.Size = UDim2.new(0.5, -10, 0, CARD_H - 8)
+        card.Position = UDim2.new(col * 0.5, col == 0 and 6 or 4, 0, row * CARD_H + 4)
+        card.BackgroundColor3 = Color3.fromRGB(26, 26, 40)
         card.BorderSizePixel = 0
         card.AutoButtonColor = false
         card.Text = ""
         card.Parent = gamesPage
-        corner(card, 10)
+        corner(card, 12)
+
+        local cGrad = Instance.new("UIGradient")
+        cGrad.Color = ColorSequence.new(Color3.fromRGB(44, 40, 70), Color3.fromRGB(16, 16, 26))
+        cGrad.Rotation = 90
+        cGrad.Parent = card
 
         local cStroke = Instance.new("UIStroke")
         cStroke.Color = e.color
         cStroke.Thickness = 1.5
         cStroke.Parent = card
 
-        local bar = Instance.new("Frame")
-        bar.Size = UDim2.new(0, 4, 1, -14)
-        bar.Position = UDim2.new(0, 6, 0, 7)
-        bar.BackgroundColor3 = e.color
-        bar.BorderSizePixel = 0
-        bar.Parent = card
-        corner(bar, 2)
+        local icon = Instance.new("TextLabel")
+        icon.Size = UDim2.new(0, 46, 0, 46)
+        icon.Position = UDim2.new(0, 8, 0.5, -23)
+        icon.BackgroundColor3 = e.color
+        icon.BackgroundTransparency = 0.2
+        icon.Text = e.icon
+        icon.TextScaled = true
+        icon.Parent = card
+        corner(icon, 23)
 
         local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, -24, 0, 24)
-        title.Position = UDim2.new(0, 16, 0, 6)
+        title.Size = UDim2.new(1, -72, 0, 24)
+        title.Position = UDim2.new(0, 64, 0, 8)
         title.BackgroundTransparency = 1
         title.Text = e.name
         title.TextColor3 = COLOR_TEXT
@@ -3441,8 +4121,8 @@ do -- game menu: a card for each game
         title.Parent = card
 
         local sub = Instance.new("TextLabel")
-        sub.Size = UDim2.new(1, -24, 0, 20)
-        sub.Position = UDim2.new(0, 16, 0, 33)
+        sub.Size = UDim2.new(1, -72, 0, 18)
+        sub.Position = UDim2.new(0, 64, 0, 32)
         sub.BackgroundTransparency = 1
         sub.Text = e.desc
         sub.TextColor3 = COLOR_DIM
@@ -3451,21 +4131,28 @@ do -- game menu: a card for each game
         sub.Font = activeFont
         sub.Parent = card
 
+        card.MouseButton1Down:Connect(function()
+            TweenService:Create(cStroke, TweenInfo.new(0.06), { Thickness = 3.5 }):Play()
+        end)
+        card.MouseButton1Up:Connect(function()
+            TweenService:Create(cStroke, TweenInfo.new(0.15), { Thickness = 1.5 }):Play()
+        end)
         card.MouseButton1Click:Connect(function()
             toggleGame(e.key)
         end)
     end
 
-    local stopGameBtn = makeButton(gamesPage, "■ STOP GAME", 5 * 70 + 6, COLOR_DIM)
+    local rows = math.ceil(#ENTRIES / 2)
+    local stopGameBtn = makeButton(gamesPage, "■ STOP GAME", rows * CARD_H + 4, COLOR_DIM)
     stopGameBtn.MouseButton1Click:Connect(function() stopGame() end)
     if gamesPage:IsA("ScrollingFrame") then
-        gamesPage.CanvasSize = UDim2.new(0, 0, 0, 500)
+        gamesPage.CanvasSize = UDim2.new(0, 0, 0, rows * CARD_H + 120)
     end
 end
 
 local gamesInfo = Instance.new("TextLabel")
 gamesInfo.Size = UDim2.new(1, 0, 0, 80)
-gamesInfo.Position = UDim2.new(0, 0, 0, 410)
+gamesInfo.Position = UDim2.new(0, 0, 0, 500)
 gamesInfo.BackgroundTransparency = 1
 gamesInfo.Text = "Original mini-games in the style of Block Blast, Stumble Guys and Steal a Brainrot. They run only on your client, so nobody else sees them. Your character is teleported during Obby and Loot Rush, and returns when you stop."
 gamesInfo.TextColor3 = COLOR_DIM
@@ -3636,8 +4323,57 @@ do -- ANIMATED UI toggle
         setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
     end)
     if settingsPage:IsA("ScrollingFrame") then
-        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 470)
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 510)
     end
+end
+
+do -- 3D UI toggle: parallax window with a drop shadow and a glossy edge
+    local btn3d, stroke3d = makeButton(settingsPage, "🧊 3D UI", 452, Color3.fromRGB(120, 200, 255))
+    setToggleVisual(stroke3d, settings.ui3d == true)
+
+    local shadow = Instance.new("Frame")
+    shadow.Name = "Shadow3D"
+    shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+    shadow.BackgroundTransparency = 0.45
+    shadow.BorderSizePixel = 0
+    shadow.ZIndex = 1
+    shadow.Visible = false
+    shadow.Parent = rgbBorder
+    corner(shadow, 12)
+
+    local gloss = Instance.new("UIStroke")
+    gloss.Color = Color3.new(1, 1, 1)
+    gloss.Thickness = 2
+    gloss.Transparency = 0.6
+    gloss.Enabled = false
+    gloss.Parent = mainFrame
+
+    RunService.Heartbeat:Connect(function()
+        if not settings.ui3d then
+            shadow.Visible = false
+            gloss.Enabled = false
+            mainFrame.Position = UDim2.new(0, 4, 0, 4)
+            return
+        end
+        shadow.Visible = true
+        gloss.Enabled = true
+        local mouse = UserInputService:GetMouseLocation()
+        local half = rgbBorder.AbsoluteSize / 2
+        local center = rgbBorder.AbsolutePosition + half
+        local dx = math.clamp((mouse.X - center.X) / math.max(1, half.X), -1, 1)
+        local dy = math.clamp((mouse.Y - center.Y) / math.max(1, half.Y), -1, 1)
+        local ox, oy = -dx * 6, -dy * 6
+        mainFrame.Position = UDim2.new(0, 4 + ox, 0, 4 + oy)
+        shadow.Position = UDim2.new(0, 4 + ox + 8, 0, 4 + oy + 10)
+        shadow.Size = mainFrame.Size
+    end)
+
+    btn3d.MouseButton1Click:Connect(function()
+        settings.ui3d = not settings.ui3d
+        saveSettings()
+        setToggleVisual(stroke3d, settings.ui3d)
+        setStatus(settings.ui3d and "3D UI on" or "3D UI off", COLOR_GREEN)
+    end)
 end
 
 local themeBtn = makeButton(settingsPage, "🎨 THEME", 252, Color3.fromRGB(255, 120, 0))
@@ -3768,4 +4504,4 @@ do
     end
 end
 
-print("MM2 Helper v3.4 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.6 Loaded - tween coins, reach, live Show Both, games, free-look invis")
