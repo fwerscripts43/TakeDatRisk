@@ -1,4 +1,4 @@
--- MM2 Helper v3.14 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.16 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.14"
+versionBadge.Text = "v3.16"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -1318,7 +1318,8 @@ local function autoShootStep(canFire)
     local ringGui = playerGui:FindFirstChild("MM2Hub_ShootRing")
     local ring = ringGui and ringGui:FindFirstChild("Ring")
     local stroke = ring and ring:FindFirstChildOfClass("UIStroke")
-    local center = camera.ViewportSize / 2
+    -- the circle follows the mouse cursor (the middle of the screen when the mouse is locked)
+    local center = UserInputService:GetMouseLocation()
     if ring then
         ring.Position = UDim2.fromOffset(center.X, center.Y)
     end
@@ -4708,7 +4709,7 @@ do -- ANIMATED UI toggle
         setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
     end)
     if settingsPage:IsA("ScrollingFrame") then
-        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 830)
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 930)
     end
 end
 
@@ -5136,6 +5137,46 @@ end)()
             setStatus(msg, COLOR_DIM)
         end
     end)
+    -- MORPH: disguise as another player (client side); the morph.lua module does the work
+    settingLabel("MORPH USERNAME (client side, only you see it)", 800)
+    local morphBox = settingBox("username", "", 818)
+    local function morphButton(text, x, color)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0.5, -4, 0, 40)
+        b.Position = UDim2.new(x, x == 0 and 0 or 4, 0, 856)
+        b.BackgroundColor3 = color
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.TextScaled = true
+        b.Font = activeFont
+        b.ZIndex = 3
+        b.Parent = settingsPage
+        corner(b, 8)
+        return b
+    end
+    local disguiseBtn = morphButton("🎭 DISGUISE", 0, COLOR_RED)
+    local resetMorphBtn = morphButton("↺ RESET", 0.5, COLOR_DIM)
+    getgenv().MM2HubClick(disguiseBtn, "MouseButton1Click", function()
+        local morph = getgenv().MM2HubMorph
+        if not morph then
+            setStatus("Morph needs loader.lua", COLOR_RED)
+            return
+        end
+        setStatus("Disguising...", COLOR_DIM)
+        local ok, msg = morph.disguise(morphBox.Text)
+        setStatus(msg, ok and COLOR_GREEN or COLOR_RED)
+    end)
+    getgenv().MM2HubClick(resetMorphBtn, "MouseButton1Click", function()
+        local morph = getgenv().MM2HubMorph
+        if not morph then
+            setStatus("Morph needs loader.lua", COLOR_RED)
+            return
+        end
+        local _, msg = morph.reset()
+        setStatus(msg, COLOR_GREEN)
+    end)
 end)()
 
 if getgenv().MM2HubNotice then
@@ -5143,4 +5184,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.14 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.16 Loaded - tween coins, reach, live Show Both, games, free-look invis")
