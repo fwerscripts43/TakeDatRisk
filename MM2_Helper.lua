@@ -1,4 +1,4 @@
--- MM2 Helper v3.12 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.13 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.12"
+versionBadge.Text = "v3.13"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -753,10 +753,12 @@ do
         if obj.Name == "KillEvent" then hookKill(obj) end
         if obj.Name == "LoadingMap" then hookLoading(obj) end
     end
-    for _, d in ipairs(game:GetDescendants()) do
+    -- only ReplicatedStorage is scanned: walking the whole game on load causes the lag spike
+    local replicated = game:GetService("ReplicatedStorage")
+    for _, d in ipairs(replicated:GetDescendants()) do
         scan(d)
     end
-    getgenv().MM2HubBind(game.DescendantAdded, scan)
+    getgenv().MM2HubBind(replicated.DescendantAdded, scan)
 end
 
 do -- ZOMBIES (Infection): anyone holding a knife. Empty unless the map is Infection.
@@ -4966,7 +4968,7 @@ do
     settingLabel("SCRIPT VERSION (type 2.8, 3.4 ... or current)", 572)
     local verBox = settingBox("e.g. 2.8 or current", "", 590)
     local loadVerBtn = makeButton(settingsPage, "📂 LOAD VERSION", 630, Color3.fromRGB(120, 200, 255))
-    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.11)", 680, COLOR_GOLD)
+    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.12)", 680, COLOR_GOLD)
 
     local function loadVersion(text)
         local switch = getgenv().MM2HubSwitch
@@ -4979,7 +4981,7 @@ do
         if not ok then setStatus(msg, COLOR_RED) end
     end
     getgenv().MM2HubClick(loadVerBtn, "MouseButton1Up", function() loadVersion(verBox.Text) end)
-    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.11") end)
+    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.12") end)
 
     -- REFRESH: checks GitHub, reloads only when the repo changed
     local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 730, COLOR_GREEN)
@@ -5004,4 +5006,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.12 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.13 Loaded - tween coins, reach, live Show Both, games, free-look invis")
