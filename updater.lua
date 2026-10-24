@@ -12,7 +12,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local BASE = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
-local FILES = { "bg_module.lua", "gif_module.lua", "MM2_Helper.lua" }
+local FILES = { "bg_module.lua", "gif_module.lua", "morph.lua", "MM2_Helper.lua" }
 local BACKUP_PREFIX = "MM2Hub_backup_"
 local PHASE_WAIT = 0.6
 
@@ -141,15 +141,95 @@ local function teardown()
     if blur then blur:Destroy() end
 end
 
+-- SWITCH VERSION button in the corner: works on every version, old ones included
+local function attachSwitcher()
+    pcall(function()
+        local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 5)
+        if not playerGui then return end
+        local old = playerGui:FindFirstChild("MM2Hub_Switch")
+        if old then old:Destroy() end
+
+        local g = Instance.new("ScreenGui")
+        g.Name = "MM2Hub_Switch"
+        g.ResetOnSpawn = false
+        g.DisplayOrder = 150
+        g.IgnoreGuiInset = true
+        g.Parent = playerGui
+
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.fromOffset(120, 26)
+        button.Position = UDim2.new(0, 10, 1, -40)
+        button.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
+        button.BorderSizePixel = 0
+        button.Text = "⇄ SWITCH VERSION"
+        button.TextColor3 = Color3.fromRGB(230, 230, 240)
+        button.TextScaled = true
+        button.Font = Enum.Font.GothamBold
+        button.Parent = g
+
+        local panel = Instance.new("Frame")
+        panel.Size = UDim2.fromOffset(240, 104)
+        panel.Position = UDim2.new(0, 10, 1, -150)
+        panel.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+        panel.BorderSizePixel = 0
+        panel.Visible = false
+        panel.Parent = g
+
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(1, -16, 0, 28)
+        box.Position = UDim2.fromOffset(8, 8)
+        box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        box.BorderSizePixel = 0
+        box.Text = ""
+        box.PlaceholderText = "2.8, 3.4 ... or current"
+        box.TextColor3 = Color3.fromRGB(230, 230, 240)
+        box.TextScaled = true
+        box.ClearTextOnFocus = false
+        box.Parent = panel
+
+        local load = Instance.new("TextButton")
+        load.Size = UDim2.new(1, -16, 0, 28)
+        load.Position = UDim2.fromOffset(8, 42)
+        load.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
+        load.BorderSizePixel = 0
+        load.Text = "LOAD VERSION"
+        load.TextColor3 = Color3.fromRGB(20, 20, 30)
+        load.TextScaled = true
+        load.Font = Enum.Font.GothamBold
+        load.Parent = panel
+
+        local msg = Instance.new("TextLabel")
+        msg.Size = UDim2.new(1, -16, 0, 22)
+        msg.Position = UDim2.fromOffset(8, 76)
+        msg.BackgroundTransparency = 1
+        msg.Text = ""
+        msg.TextColor3 = Color3.fromRGB(200, 200, 210)
+        msg.TextScaled = true
+        msg.Parent = panel
+
+        button.MouseButton1Click:Connect(function()
+            panel.Visible = not panel.Visible
+        end)
+        load.MouseButton1Click:Connect(function()
+            msg.Text = "Loading..."
+            local _, text = U.switch(box.Text)
+            msg.Text = tostring(text)
+        end)
+    end)
+end
+
 local function runAll(bundle)
     local G = getgenv()
     local bgModule = loadstring(bundle["bg_module.lua"])()
     bgModule.baseUrl = BASE
     G.MM2HubBg = bgModule
     G.MM2HubGif = loadstring(bundle["gif_module.lua"])()
+    local morphModule = loadstring(bundle["morph.lua"])()
+    G.MM2HubMorph = morphModule
     local chunk, err = loadstring(bundle["MM2_Helper.lua"])
     if not chunk then error(err, 0) end
     chunk()
+    attachSwitcher()
 end
 
 -- backups: the last copy that started successfully
@@ -290,6 +370,7 @@ function U.switch(input)
     local bundle = {
         ["bg_module.lua"] = cur["bg_module.lua"],
         ["gif_module.lua"] = cur["gif_module.lua"],
+        ["morph.lua"] = cur["morph.lua"],
         ["MM2_Helper.lua"] = helper,
     }
 
