@@ -1,4 +1,4 @@
--- MM2 Helper v3.9 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.11 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.9"
+versionBadge.Text = "v3.11"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -713,6 +713,78 @@ local function startDecor(deco)
     end)
 end
 
+-- ROUND WATCH: LoadingMap tells us the gamemode, KillEvent tells us who died
+do
+    local killed = {} -- [Player] = true once a kill has been seen this round
+    getgenv().MM2HubKilled = killed
+    getgenv().MM2HubInfection = false
+
+    local function toPlayer(v)
+        if typeof(v) ~= "Instance" then return nil end
+        if v:IsA("Player") then return v end
+        return Players:GetPlayerFromCharacter(v)
+    end
+
+    local function hookKill(remote)
+        if remote:IsA("RemoteEvent") then
+            remote.OnClientEvent:Connect(function(...)
+                for _, arg in ipairs({ ... }) do
+                    local p = toPlayer(arg)
+                    if p then killed[p] = true end
+                end
+            end)
+        end
+    end
+
+    local function hookLoading(remote)
+        if remote:IsA("RemoteEvent") then
+            remote.OnClientEvent:Connect(function(mode)
+                table.clear(killed) -- a new map means a new round
+                local text = string.lower(tostring(mode or ""))
+                getgenv().MM2HubInfection = string.find(text, "infection", 1, true) ~= nil
+                if getgenv().MM2HubInfection then
+                    setStatus("Infection mode: everyone with a knife is a ZOMBIE", COLOR_GREEN)
+                end
+            end)
+        end
+    end
+
+    local function scan(obj)
+        if obj.Name == "KillEvent" then hookKill(obj) end
+        if obj.Name == "LoadingMap" then hookLoading(obj) end
+    end
+    for _, d in ipairs(game:GetDescendants()) do
+        scan(d)
+    end
+    getgenv().MM2HubBind(game.DescendantAdded, scan)
+end
+
+do -- ZOMBIES (Infection): anyone holding a knife. Empty unless the map is Infection.
+local function playerHasKnife(plr)
+    local function has(container)
+        if not container then return false end
+        for _, t in ipairs(container:GetChildren()) do
+            if t:IsA("Tool") and string.find(string.lower(t.Name), "knife", 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+    return has(plr.Character) or has(plr:FindFirstChildOfClass("Backpack"))
+end
+
+getgenv().MM2HubZombies = function()
+    local list = {}
+    if not getgenv().MM2HubInfection then return list end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and playerHasKnife(plr) then
+            table.insert(list, plr)
+        end
+    end
+    return list
+end
+end
+
 -- ============================
 -- ESP TAB
 -- ============================
@@ -724,6 +796,16 @@ local tracersBtn, tracersStroke = makeButton(espPage, "➳ TRACERS", 200, Color3
 
 getgenv().MM2HubClick(findMurderBtn, "MouseButton1Click", function()
     clearOutlines()
+    local zombies = getgenv().MM2HubZombies()
+    if #zombies > 0 then
+        clearBillboards()
+        for _, z in ipairs(zombies) do
+            outlinePlayer(z, true, COLOR_GREEN)
+            addBillboard(z, "🧟 ZOMBIE", COLOR_GREEN)
+        end
+        setStatus("🧟 " .. #zombies .. " ZOMBIE(s) (Infection)", COLOR_GREEN)
+        return
+    end
     local murderer = findMurderer()
     if murderer then
         outlinePlayer(murderer, true, COLOR_RED)
@@ -753,8 +835,10 @@ local lastMurd, lastSheriff = nil, nil
 local function refreshViewBoth(force)
     local murderer = findMurderer()
     local sheriff = findSheriffThatsNotMe()
+    local zombies = getgenv().MM2HubZombies()
 
     local needsRedraw = force
+        or #zombies ~= (getgenv().MM2HubZombieCount or 0)
         or murderer ~= lastMurd
         or sheriff ~= lastSheriff
         or (murderer and murderer.Character and not murderer.Character:FindFirstChild("OutlineHighlight"))
@@ -779,6 +863,12 @@ local function refreshViewBoth(force)
         table.insert(lines, "🔫 " .. sheriff.DisplayName .. " = SHERIFF")
     else
         table.insert(lines, "🔫 No sheriff found")
+    end
+    getgenv().MM2HubZombieCount = #zombies
+    for _, z in ipairs(zombies) do
+        outlinePlayer(z, true, COLOR_GREEN)
+        addBillboard(z, "🧟 ZOMBIE", COLOR_GREEN)
+        table.insert(lines, "🧟 " .. z.DisplayName .. " = ZOMBIE")
     end
     setStatus(table.concat(lines, "\n"), COLOR_TEXT)
 end
@@ -957,6 +1047,9 @@ scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 60, 100)
 scrollingFrame.ZIndex = 3
 scrollingFrame.Parent = combatPage
 corner(scrollingFrame, 8)
+scrollingFrame.ClipsDescendants = true
+scrollingFrame.Size = UDim2.new(1, 0, 0, 0)
+scrollingFrame.Visible = false
 
 local listLayout = Instance.new("UIListLayout")
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1124,6 +1217,16 @@ getgenv().MM2HubClick(toggleAimBtn, "MouseButton1Click", function()
         setStatus("AUTO AIM OFF")
     end
     setToggleVisual(aimStroke, aimEnabled)
+    -- the target list slides down under the button when aim is on, and back up when off
+    if aimEnabled then
+        scrollingFrame.Visible = true
+        TweenService:Create(scrollingFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), { Size = UDim2.new(1, 0, 0, 120) }):Play()
+    else
+        TweenService:Create(scrollingFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), { Size = UDim2.new(1, 0, 0, 0) }):Play()
+        task.delay(0.26, function()
+            if not aimEnabled then scrollingFrame.Visible = false end
+        end)
+    end
 end)
 
 local function createPlayerButton(plr)
@@ -1234,7 +1337,13 @@ local function autoShootStep(canFire)
 
     if canFire then
         local dist = (head.Position - camera.CFrame.Position).Magnitude
-        local predicted = head.Position + tRoot.AssemblyLinearVelocity * (dist / BULLET_SPEED)
+        local aim = math.clamp((settings.shootAim or 100) / 100, 0, 1)
+        local lead = 0.5 + 0.5 * aim -- WEAK leads only half the way, STRONG the full way
+        local spread = (1 - aim) * 3 -- WEAK adds a few studs of random miss, STRONG has none
+        local predicted = head.Position + tRoot.AssemblyLinearVelocity * (dist / BULLET_SPEED) * lead
+        if spread > 0 then
+            predicted = predicted + Vector3.new(math.random() * 2 - 1, math.random() * 2 - 1, math.random() * 2 - 1) * spread
+        end
         aimFire(predicted)
         setStatus("🎯 Auto shooting " .. murderer.DisplayName, COLOR_BLUE)
     end
@@ -1277,6 +1386,7 @@ getgenv().MM2HubClick(autoShootBtn, "MouseButton1Click", function()
         g.ResetOnSpawn = false
         g.IgnoreGuiInset = true
         g.DisplayOrder = 60
+        g.Enabled = settings.showCircle ~= false
         g.Parent = playerGui
         local radius = settings.shootRing or 110
         local ring = Instance.new("Frame")
@@ -1307,6 +1417,191 @@ getgenv().MM2HubClick(autoShootBtn, "MouseButton1Click", function()
     end
 end)
 
+-- AUTO SHOOT SETTINGS: right-click AUTO SHOOT to slide the panel out, right-click again to hide it
+do
+    local SHOOT_MIN, SHOOT_MAX = 40, 300
+    settings.shootRing = math.clamp(tonumber(settings.shootRing) or 110, SHOOT_MIN, SHOOT_MAX)
+    settings.shootAim = math.clamp(tonumber(settings.shootAim) or 100, 0, 100)
+
+    local function applyRing(r)
+        local g = playerGui:FindFirstChild("MM2Hub_ShootRing")
+        local ring = g and g:FindFirstChild("Ring")
+        if ring then
+            ring.Size = UDim2.fromOffset(r * 2, r * 2)
+        end
+    end
+
+    local panel = Instance.new("Frame")
+    panel.Name = "AutoShootPanel"
+    panel.Size = UDim2.fromOffset(190, 236)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+    panel.BorderSizePixel = 0
+    panel.Visible = false
+    panel.ZIndex = 20
+    panel.Parent = screenGui
+    corner(panel, 12)
+
+    local pStroke = Instance.new("UIStroke")
+    pStroke.Color = COLOR_BLUE
+    pStroke.Thickness = 2
+    pStroke.Parent = panel
+
+    local head = Instance.new("TextLabel")
+    head.Size = UDim2.new(1, -20, 0, 26)
+    head.Position = UDim2.fromOffset(10, 8)
+    head.BackgroundTransparency = 1
+    head.Text = "AUTO SHOOT SETTINGS"
+    head.TextColor3 = COLOR_TEXT
+    head.TextScaled = true
+    head.Font = activeFont
+    head.ZIndex = 21
+    head.Parent = panel
+
+    local shootOpen, shootProgress = false, 0
+    getgenv().MM2HubBind(RunService.RenderStepped, function(dt)
+        if not shootOpen and shootProgress <= 0 then
+            panel.Visible = false
+            return
+        end
+        local goal = shootOpen and 1 or 0
+        if shootProgress < goal then
+            shootProgress = math.min(goal, shootProgress + dt * 4)
+        elseif shootProgress > goal then
+            shootProgress = math.max(goal, shootProgress - dt * 4)
+        end
+        local eased = 1 - (1 - shootProgress) ^ 3
+        local x = rgbBorder.AbsolutePosition.X
+        local w = rgbBorder.AbsoluteSize.X
+        local y = rgbBorder.AbsolutePosition.Y + 40
+        local hiddenX = x + w - 24
+        local shownX = x + w + 8
+        panel.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
+        panel.Visible = rgbBorder.Visible
+    end)
+
+    local function makeSlider(y, label, minV, maxV, get, set, fmt)
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -20, 0, 20)
+        lbl.Position = UDim2.fromOffset(10, y)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3 = COLOR_TEXT
+        lbl.TextScaled = true
+        lbl.Font = activeFont
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.ZIndex = 21
+        lbl.Parent = panel
+
+        local track = Instance.new("Frame")
+        track.Size = UDim2.new(1, -30, 0, 8)
+        track.Position = UDim2.fromOffset(15, y + 36)
+        track.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+        track.BorderSizePixel = 0
+        track.ZIndex = 21
+        track.Parent = panel
+        corner(track, 4)
+
+        local fill = Instance.new("Frame")
+        fill.Size = UDim2.new(0, 0, 1, 0)
+        fill.BackgroundColor3 = COLOR_BLUE
+        fill.BorderSizePixel = 0
+        fill.ZIndex = 22
+        fill.Parent = track
+        corner(fill, 4)
+
+        local knob = Instance.new("TextButton")
+        knob.Size = UDim2.new(0, 18, 0, 18)
+        knob.AnchorPoint = Vector2.new(0.5, 0.5)
+        knob.Position = UDim2.new(0, 0, 0.5, 0)
+        knob.BackgroundColor3 = Color3.new(1, 1, 1)
+        knob.BorderSizePixel = 0
+        knob.AutoButtonColor = false
+        knob.Text = ""
+        knob.ZIndex = 23
+        knob.Parent = track
+        corner(knob, 9)
+
+        local function show(v)
+            local frac = (v - minV) / (maxV - minV)
+            fill.Size = UDim2.new(frac, 0, 1, 0)
+            knob.Position = UDim2.new(frac, 0, 0.5, 0)
+            lbl.Text = label .. ": " .. fmt(v)
+        end
+        show(get())
+
+        local dragging = false
+        local function fromX(x)
+            local rel = (x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X)
+            local v = math.floor(minV + math.clamp(rel, 0, 1) * (maxV - minV) + 0.5)
+            set(v)
+            show(v)
+        end
+        local function begin(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+                return
+            end
+            dragging = true
+            fromX(input.Position.X)
+        end
+        track.InputBegan:Connect(begin)
+        knob.InputBegan:Connect(begin)
+
+        getgenv().MM2HubBind(UserInputService.InputChanged, function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                fromX(input.Position.X)
+            end
+        end)
+        getgenv().MM2HubBind(UserInputService.InputEnded, function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                dragging = false
+                saveSettings()
+            end
+        end)
+    end
+
+    makeSlider(44, "CIRCLE SIZE", SHOOT_MIN, SHOOT_MAX,
+        function() return settings.shootRing end,
+        function(v) settings.shootRing = v; applyRing(v) end,
+        function(v) return v .. " px" end)
+
+    makeSlider(120, "AIM", 0, 100,
+        function() return settings.shootAim end,
+        function(v) settings.shootAim = v end,
+        function(v)
+            local word = v >= 75 and "STRONG" or (v >= 40 and "MEDIUM" or "WEAK")
+            return word .. " " .. v .. "%"
+        end)
+
+    settings.showCircle = settings.showCircle ~= false
+    local circleBtn = Instance.new("TextButton")
+    circleBtn.Size = UDim2.fromOffset(170, 32)
+    circleBtn.Position = UDim2.fromOffset(10, 192)
+    circleBtn.BorderSizePixel = 0
+    circleBtn.AutoButtonColor = false
+    circleBtn.TextColor3 = Color3.new(1, 1, 1)
+    circleBtn.TextScaled = true
+    circleBtn.Font = activeFont
+    circleBtn.ZIndex = 21
+    circleBtn.Parent = panel
+    corner(circleBtn, 8)
+
+    local function showCircleUI()
+        circleBtn.Text = settings.showCircle and "SHOW CIRCLE: ON" or "SHOW CIRCLE: OFF"
+        circleBtn.BackgroundColor3 = settings.showCircle and COLOR_BLUE or Color3.fromRGB(40, 40, 60)
+        local g = playerGui:FindFirstChild("MM2Hub_ShootRing")
+        if g then g.Enabled = settings.showCircle end
+    end
+    showCircleUI()
+    getgenv().MM2HubClick(circleBtn, "MouseButton1Click", function()
+        settings.showCircle = not settings.showCircle
+        saveSettings()
+        showCircleUI()
+    end)
+
+    getgenv().MM2HubClick(autoShootBtn, "MouseButton2Click", function()
+        shootOpen = not shootOpen
+    end)
+end
+
 -- AUTO MURD WIN
 local murdWinOn = false
 
@@ -1328,10 +1623,11 @@ local function murdWinLoop()
                 for _, plr in ipairs(Players:GetPlayers()) do
                     if not murdWinOn then break end
                     local tHRP = plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-                    if tHRP and not isDead(plr) then
+                    if tHRP and not isDead(plr) and not getgenv().MM2HubKilled[plr] then
                         hrp.CFrame = CFrame.new(tHRP.Position + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3)))
                         pcall(function() knife:Activate() end)
                         task.wait(0.12)
+                        if isDead(plr) then getgenv().MM2HubKilled[plr] = true end
                     end
                 end
             end
@@ -1460,13 +1756,17 @@ local function setReach(plr, on)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     local saved = reachOriginal[plr]
+    if on and isDead(plr) then
+        on = false -- dead players go back to normal size, so a ragdolled body can't push or fling
+    end
 
     if on then
         if not saved or saved.hrp ~= hrp then
-            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, collide = {} }
+            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, massless = hrp.Massless, collide = {} }
             reachOriginal[plr] = saved
         end
         hrp.Size = reachVector()
+        hrp.Massless = true -- a bigger part gets much heavier; without this it can drag and fling you
         hrp.Transparency = 0.7
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -1479,6 +1779,7 @@ local function setReach(plr, on)
     elseif saved and saved.hrp == hrp then
         hrp.Size = saved.size
         hrp.Transparency = saved.transparency
+        hrp.Massless = saved.massless
         for part, cc in pairs(saved.collide) do
             if part.Parent then
                 part.CanCollide = cc
@@ -1687,13 +1988,13 @@ end
 do -- MURDER REACH SIZE POPUP (right-click the MURDER REACH button)
 local reachPopup = Instance.new("Frame")
 reachPopup.Name = "ReachPopup"
-reachPopup.Size = UDim2.new(1, -24, 0, 170)
-reachPopup.Position = UDim2.new(0, 12, 0, 96)
+reachPopup.Size = UDim2.fromOffset(200, 170)
+reachPopup.Position = UDim2.fromOffset(0, 0)
 reachPopup.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
 reachPopup.BorderSizePixel = 0
 reachPopup.Visible = false
 reachPopup.ZIndex = 20
-reachPopup.Parent = mainFrame
+reachPopup.Parent = screenGui
 corner(reachPopup, 10)
 
 local popStroke = Instance.new("UIStroke")
@@ -1705,7 +2006,7 @@ local popTitle = Instance.new("TextLabel")
 popTitle.Size = UDim2.new(1, -20, 0, 24)
 popTitle.Position = UDim2.new(0, 10, 0, 8)
 popTitle.BackgroundTransparency = 1
-popTitle.Text = "MURDER REACH SIZE"
+popTitle.Text = "MURDER HITBOX SIZE"
 popTitle.TextColor3 = COLOR_TEXT
 popTitle.TextScaled = true
 popTitle.Font = activeFont
@@ -1750,6 +2051,28 @@ knob.Text = ""
 knob.ZIndex = 23
 knob.Parent = track
 corner(knob, 9)
+
+local reachOpen, reachProgress = false, 0
+getgenv().MM2HubBind(RunService.RenderStepped, function(dt)
+    if not reachOpen and reachProgress <= 0 then
+        reachPopup.Visible = false
+        return
+    end
+    local goal = reachOpen and 1 or 0
+    if reachProgress < goal then
+        reachProgress = math.min(goal, reachProgress + dt * 4)
+    elseif reachProgress > goal then
+        reachProgress = math.max(goal, reachProgress - dt * 4)
+    end
+    local eased = 1 - (1 - reachProgress) ^ 3
+    local x = rgbBorder.AbsolutePosition.X
+    local w = rgbBorder.AbsoluteSize.X
+    local y = rgbBorder.AbsolutePosition.Y + 40
+    local hiddenX = x + w - 24
+    local shownX = x + w + 8
+    reachPopup.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
+    reachPopup.Visible = rgbBorder.Visible
+end)
 
 local draggingSlider = false
 
@@ -1807,11 +2130,11 @@ reachDone.Parent = reachPopup
 corner(reachDone, 6)
 
 getgenv().MM2HubClick(reachDone, "MouseButton1Click", function()
-    reachPopup.Visible = false
+    reachOpen = false
 end)
 
 reachBtn.MouseButton2Click:Connect(function()
-    reachPopup.Visible = not reachPopup.Visible
+    reachOpen = not reachOpen
 end)
 
 setReachSize(reachSize)
@@ -2409,6 +2732,13 @@ do
             end
         end
         setAnimateDisabled(char, true)
+        if char then
+            for _, m in ipairs(char:GetDescendants()) do
+                if m:IsA("Motor6D") then
+                    m.Transform = CFrame.new() -- stiff: no pose offset from any animation
+                end
+            end
+        end
     end)
 
     getgenv().MM2HubClick(noAnimBtn, "MouseButton1Click", function()
@@ -4594,22 +4924,28 @@ do
         return b
     end
 
-    -- MAIN GUI KEY: type a key name, then press Enter or click away
-    settingLabel("MAIN GUI KEY (hides / shows the window)", 500)
-    local keyBox = settingBox("e.g. RightShift, F, Insert", settings.toggleKey, 518)
-    keyBox.FocusLost:Connect(function()
-        local key = keyFromName(keyBox.Text)
-        if key then
-            settings.toggleKey = key.Name
-            saveSettings()
-            keyBox.Text = key.Name
-            setStatus("Main GUI key: " .. key.Name, COLOR_GREEN)
-        else
-            keyBox.Text = settings.toggleKey
-            setStatus("Unknown key name", COLOR_RED)
-        end
+    -- MAIN GUI KEY: press the button, then press the key to use as the toggle
+    local waitingKey = false
+    local keyBtn = makeButton(settingsPage, "⌨ MAIN GUI KEY: " .. settings.toggleKey, 500, COLOR_GOLD)
+    getgenv().MM2HubClick(keyBtn, "MouseButton1Click", function()
+        waitingKey = true
+        keyBtn.Text = "Click a key to set as toggle"
+        setStatus("Click a key to set as toggle (Esc cancels)", COLOR_GOLD)
     end)
     getgenv().MM2HubBind(UserInputService.InputBegan, function(input, gp)
+        if waitingKey then
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            waitingKey = false
+            if input.KeyCode ~= Enum.KeyCode.Escape then
+                settings.toggleKey = input.KeyCode.Name
+                saveSettings()
+                setStatus("Main GUI key: " .. settings.toggleKey, COLOR_GREEN)
+            else
+                setStatus("Key change cancelled", COLOR_DIM)
+            end
+            keyBtn.Text = "⌨ MAIN GUI KEY: " .. settings.toggleKey
+            return
+        end
         if gp or not getgenv().MM2HubShown then return end
         if input.KeyCode.Name == settings.toggleKey then
             rgbBorder.Visible = not rgbBorder.Visible
@@ -4620,7 +4956,7 @@ do
     settingLabel("SCRIPT VERSION (type 2.8, 3.4 ... or current)", 572)
     local verBox = settingBox("e.g. 2.8 or current", "", 590)
     local loadVerBtn = makeButton(settingsPage, "📂 LOAD VERSION", 630, Color3.fromRGB(120, 200, 255))
-    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.8)", 680, COLOR_GOLD)
+    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.10)", 680, COLOR_GOLD)
 
     local function loadVersion(text)
         local switch = getgenv().MM2HubSwitch
@@ -4633,7 +4969,7 @@ do
         if not ok then setStatus(msg, COLOR_RED) end
     end
     getgenv().MM2HubClick(loadVerBtn, "MouseButton1Up", function() loadVersion(verBox.Text) end)
-    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.8") end)
+    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.10") end)
 
     -- REFRESH: checks GitHub, reloads only when the repo changed
     local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 730, COLOR_GREEN)
@@ -4658,4 +4994,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.9 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.11 Loaded - tween coins, reach, live Show Both, games, free-look invis")
