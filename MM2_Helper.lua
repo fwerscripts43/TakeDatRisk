@@ -1,4 +1,4 @@
--- MM2 Helper v3.11 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.12 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -197,7 +197,7 @@ screenGui.Parent = playerGui
 
 -- LOADING SCREEN: blur + loading bar (bottom-right) + caption, removed once the window is ready
 local loadingFinish
-if getgenv().MM2HubBoot then
+if getgenv().MM2HubBoot and type(getgenv().MM2HubBoot.finish) == "function" then
     loadingFinish = getgenv().MM2HubBoot.finish
 else
 do
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.11"
+versionBadge.Text = "v3.12"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -727,7 +727,7 @@ do
 
     local function hookKill(remote)
         if remote:IsA("RemoteEvent") then
-            remote.OnClientEvent:Connect(function(...)
+            getgenv().MM2HubBind(remote.OnClientEvent, function(...)
                 for _, arg in ipairs({ ... }) do
                     local p = toPlayer(arg)
                     if p then killed[p] = true end
@@ -738,7 +738,7 @@ do
 
     local function hookLoading(remote)
         if remote:IsA("RemoteEvent") then
-            remote.OnClientEvent:Connect(function(mode)
+            getgenv().MM2HubBind(remote.OnClientEvent, function(mode)
                 table.clear(killed) -- a new map means a new round
                 local text = string.lower(tostring(mode or ""))
                 getgenv().MM2HubInfection = string.find(text, "infection", 1, true) ~= nil
@@ -836,9 +836,20 @@ local function refreshViewBoth(force)
     local murderer = findMurderer()
     local sheriff = findSheriffThatsNotMe()
     local zombies = getgenv().MM2HubZombies()
+    local lastZ = getgenv().MM2HubZombieList or {}
+    local zombiesChanged = #zombies ~= #lastZ
+    if not zombiesChanged then
+        for i, z in ipairs(zombies) do
+            if z ~= lastZ[i] then
+                zombiesChanged = true
+                break
+            end
+        end
+    end
+    getgenv().MM2HubZombieList = zombies
 
     local needsRedraw = force
-        or #zombies ~= (getgenv().MM2HubZombieCount or 0)
+        or zombiesChanged
         or murderer ~= lastMurd
         or sheriff ~= lastSheriff
         or (murderer and murderer.Character and not murderer.Character:FindFirstChild("OutlineHighlight"))
@@ -864,8 +875,7 @@ local function refreshViewBoth(force)
     else
         table.insert(lines, "🔫 No sheriff found")
     end
-    getgenv().MM2HubZombieCount = #zombies
-    for _, z in ipairs(zombies) do
+        for _, z in ipairs(zombies) do
         outlinePlayer(z, true, COLOR_GREEN)
         addBillboard(z, "🧟 ZOMBIE", COLOR_GREEN)
         table.insert(lines, "🧟 " .. z.DisplayName .. " = ZOMBIE")
@@ -2453,7 +2463,7 @@ local function autoCoinLoop()
     local remote = findRemoteNamed("CoinCollected")
     local remoteConn
     if remote then
-        remoteConn = remote.OnClientEvent:Connect(function(...)
+        remoteConn = getgenv().MM2HubBind(remote.OnClientEvent, function(...)
             coinSignal:Fire(...)
         end)
     else
@@ -4956,7 +4966,7 @@ do
     settingLabel("SCRIPT VERSION (type 2.8, 3.4 ... or current)", 572)
     local verBox = settingBox("e.g. 2.8 or current", "", 590)
     local loadVerBtn = makeButton(settingsPage, "📂 LOAD VERSION", 630, Color3.fromRGB(120, 200, 255))
-    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.10)", 680, COLOR_GOLD)
+    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.11)", 680, COLOR_GOLD)
 
     local function loadVersion(text)
         local switch = getgenv().MM2HubSwitch
@@ -4969,7 +4979,7 @@ do
         if not ok then setStatus(msg, COLOR_RED) end
     end
     getgenv().MM2HubClick(loadVerBtn, "MouseButton1Up", function() loadVersion(verBox.Text) end)
-    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.10") end)
+    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.11") end)
 
     -- REFRESH: checks GitHub, reloads only when the repo changed
     local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 730, COLOR_GREEN)
@@ -4994,4 +5004,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.11 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.12 Loaded - tween coins, reach, live Show Both, games, free-look invis")
