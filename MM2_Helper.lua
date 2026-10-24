@@ -1,4 +1,4 @@
--- MM2 Helper v3.16 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.17 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.16"
+versionBadge.Text = "v3.17"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -922,14 +922,19 @@ getgenv().MM2HubClick(seeAllBtn, "MouseButton1Click", function()
     end
     seeAllBtn.Text = "◈ HIDE ALL"
     setToggleVisual(seeAllStroke, true)
-    local count = 0
+    local murderers, innocents = 0, 0
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character and not hasToolMatching(plr, "knife") then
-            outlinePlayer(plr, true, COLOR_GREEN)
-            count = count + 1
+        if plr ~= player and plr.Character then
+            if hasToolMatching(plr, "knife") then
+                outlinePlayer(plr, true, COLOR_RED)
+                murderers = murderers + 1
+            else
+                outlinePlayer(plr, true, COLOR_GREEN)
+                innocents = innocents + 1
+            end
         end
     end
-    setStatus("Outlined " .. count .. " innocent player" .. (count == 1 and "" or "s"), COLOR_GREEN)
+    setStatus("Highlighted " .. innocents .. " innocent, " .. murderers .. " murderer", COLOR_TEXT)
 end)
 
 -- TRACERS
@@ -1662,18 +1667,16 @@ getgenv().MM2HubClick(autoMurdWinBtn, "MouseButton1Click", function()
     end
 end)
 
--- AUTO GRAB GUN
+-- AUTO GRAB GUN: with no gun, finds the "GunDrop" part inside a model in workspace,
+-- teleports onto it for 0.2s to pick it up, then teleports you back
 local autoGunOn = false
-local watchedHolder = nil
-local lastHolderPos = nil -- last spot the Gun holder was seen alive
-local gunSent = false -- already teleported for this death
 
-local function findDroppedGun()
-    for _, item in ipairs(workspace:GetDescendants()) do
-        if item:IsA("Tool") and item.Name == "Gun" and item:FindFirstChild("Handle") then
-            local p = item.Parent
-            if p and not p:IsA("Backpack") and not p:FindFirstChildOfClass("Humanoid") then
-                return item
+local function findGunDrop()
+    for _, m in ipairs(workspace:GetChildren()) do
+        if m:IsA("Model") then
+            local part = m:FindFirstChild("GunDrop", true)
+            if part and part:IsA("BasePart") then
+                return part
             end
         end
     end
@@ -1682,54 +1685,26 @@ end
 
 local function autoGunLoop()
     while autoGunOn and HUB_GEN == getgenv().MM2HubGen do
-        task.wait(0.2)
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
+        task.wait(0.25)
         if hasLocalGun() then
-            watchedHolder = nil
-            gunSent = false
-            setStatus("You have the gun!", Color3.fromRGB(100, 255, 100))
+            setStatus("You have the gun!", COLOR_GREEN)
         else
-            local holder = findSheriffThatsNotMe()
-            if holder and not isDead(holder) then
-                -- sheriff is alive: remember where they are and wait
-                watchedHolder = holder
-                gunSent = false
-                local hh = holder.Character and holder.Character:FindFirstChild("HumanoidRootPart")
-                if hh then
-                    lastHolderPos = hh.Position
+            local drop = findGunDrop()
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if drop and hrp then
+                local backCF = hrp.CFrame
+                setStatus("Grabbing the gun...", COLOR_BLUE)
+                hrp.CFrame = drop.CFrame + Vector3.new(0, 3, 0)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                task.wait(0.2)
+                local nowChar = player.Character
+                local nowHrp = nowChar and nowChar:FindFirstChild("HumanoidRootPart")
+                if nowHrp then
+                    nowHrp.CFrame = backCF
+                    nowHrp.AssemblyLinearVelocity = Vector3.zero
                 end
-                setStatus("Sheriff: " .. holder.DisplayName .. "\nWaiting for death...", COLOR_BLUE)
-            elseif not gunSent then
-                -- sheriff is dead (or was already dead when turned on):
-                -- go to the dropped gun, or to the last spot the sheriff was seen
-                local gunTool = findDroppedGun()
-                local spot = nil
-                if gunTool then
-                    spot = gunTool.Handle.Position
-                elseif lastHolderPos then
-                    spot = lastHolderPos
-                end
-
-                if spot and hrp then
-                    local returnCF = hrp.CFrame
-                    hrp.CFrame = CFrame.new(spot + Vector3.new(0, 4, 0))
-                    gunSent = true
-                    -- give the touch a couple of frames to register, then snap back
-                    task.spawn(function()
-                        RunService.Heartbeat:Wait()
-                        RunService.Heartbeat:Wait()
-                        local c = player.Character
-                        local h = c and c:FindFirstChild("HumanoidRootPart")
-                        if h then
-                            h.CFrame = returnCF
-                        end
-                    end)
-                    setStatus(gunTool and "Sheriff died, grabbing the gun!" or "Sheriff died here, going to last spot...", Color3.fromRGB(100, 255, 100))
-                else
-                    setStatus("No dropped gun or sheriff spot found yet", COLOR_RED)
-                end
+                task.wait(1.5) -- let the pickup finish before trying again
             end
         end
     end
@@ -1740,13 +1715,11 @@ getgenv().MM2HubClick(autoGunBtn, "MouseButton1Click", function()
     if autoGunOn then
         autoGunBtn.Text = "🔫 STOP AUTO GUN"
         setToggleVisual(autoGunStroke, true)
-        watchedHolder = nil
-        setStatus("AUTO GRAB GUN ACTIVE\nWaiting for sheriff...", COLOR_BLUE)
+        setStatus("AUTO GRAB GUN ON", COLOR_BLUE)
         task.spawn(autoGunLoop)
     else
         autoGunBtn.Text = "🔫 AUTO GRAB GUN"
         setToggleVisual(autoGunStroke, false)
-        watchedHolder = nil
         setStatus("AUTO GRAB GUN OFF")
     end
 end)
@@ -1769,17 +1742,13 @@ local function setReach(plr, on)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     local saved = reachOriginal[plr]
-    if on and isDead(plr) then
-        on = false -- dead players go back to normal size, so a ragdolled body can't push or fling
-    end
 
     if on then
         if not saved or saved.hrp ~= hrp then
-            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, massless = hrp.Massless, collide = {} }
+            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, collide = {} }
             reachOriginal[plr] = saved
         end
         hrp.Size = reachVector()
-        hrp.Massless = true -- a bigger part gets much heavier; without this it can drag and fling you
         hrp.Transparency = 0.7
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -1792,7 +1761,6 @@ local function setReach(plr, on)
     elseif saved and saved.hrp == hrp then
         hrp.Size = saved.size
         hrp.Transparency = saved.transparency
-        hrp.Massless = saved.massless
         for part, cc in pairs(saved.collide) do
             if part.Parent then
                 part.CanCollide = cc
@@ -4959,7 +4927,7 @@ end)()
             keyBtn.Text = "⌨ MAIN GUI KEY: " .. settings.toggleKey
             return
         end
-        if gp or not getgenv().MM2HubShown then return end
+        if UserInputService:GetFocusedTextBox() or not getgenv().MM2HubShown then return end
         if input.KeyCode.Name == settings.toggleKey then
             rgbBorder.Visible = not rgbBorder.Visible
         end
@@ -5137,46 +5105,6 @@ end)()
             setStatus(msg, COLOR_DIM)
         end
     end)
-    -- MORPH: disguise as another player (client side); the morph.lua module does the work
-    settingLabel("MORPH USERNAME (client side, only you see it)", 800)
-    local morphBox = settingBox("username", "", 818)
-    local function morphButton(text, x, color)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0.5, -4, 0, 40)
-        b.Position = UDim2.new(x, x == 0 and 0 or 4, 0, 856)
-        b.BackgroundColor3 = color
-        b.BorderSizePixel = 0
-        b.AutoButtonColor = false
-        b.Text = text
-        b.TextColor3 = Color3.new(1, 1, 1)
-        b.TextScaled = true
-        b.Font = activeFont
-        b.ZIndex = 3
-        b.Parent = settingsPage
-        corner(b, 8)
-        return b
-    end
-    local disguiseBtn = morphButton("🎭 DISGUISE", 0, COLOR_RED)
-    local resetMorphBtn = morphButton("↺ RESET", 0.5, COLOR_DIM)
-    getgenv().MM2HubClick(disguiseBtn, "MouseButton1Click", function()
-        local morph = getgenv().MM2HubMorph
-        if not morph then
-            setStatus("Morph needs loader.lua", COLOR_RED)
-            return
-        end
-        setStatus("Disguising...", COLOR_DIM)
-        local ok, msg = morph.disguise(morphBox.Text)
-        setStatus(msg, ok and COLOR_GREEN or COLOR_RED)
-    end)
-    getgenv().MM2HubClick(resetMorphBtn, "MouseButton1Click", function()
-        local morph = getgenv().MM2HubMorph
-        if not morph then
-            setStatus("Morph needs loader.lua", COLOR_RED)
-            return
-        end
-        local _, msg = morph.reset()
-        setStatus(msg, COLOR_GREEN)
-    end)
 end)()
 
 if getgenv().MM2HubNotice then
@@ -5184,4 +5112,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.16 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.17 Loaded - tween coins, reach, live Show Both, games, free-look invis")
