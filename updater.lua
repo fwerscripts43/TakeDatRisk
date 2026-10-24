@@ -12,7 +12,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local BASE = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
-local FILES = { "bg_module.lua", "gif_module.lua", "morph.lua", "MM2_Helper.lua" }
+local FILES = { "bg_module.lua", "gif_module.lua", "MM2_Helper.lua" }
 local BACKUP_PREFIX = "MM2Hub_backup_"
 local PHASE_WAIT = 0.6
 
@@ -141,7 +141,56 @@ local function teardown()
     if blur then blur:Destroy() end
 end
 
--- SWITCH VERSION button in the corner: works on every version, old ones included
+-- VERSIONS: the repo's versions/ folder (newest first), with a check of which ones work
+local FALLBACK_VERSIONS = { "2.8", "2.9", "3.0", "3.2", "3.4", "3.5", "3.6", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17" }
+
+local function versionKey(v)
+    local a, b = string.match(v, "^(%d+)%.(%d+)")
+    return (tonumber(a) or 0) * 1000 + (tonumber(b) or 0)
+end
+
+local function listVersions()
+    local found = {}
+    local okA, body = pcall(game.HttpGet, game, "https://api.github.com/repos/fwerscripts43/TakeDatRisk/contents/versions")
+    if okA and type(body) == "string" then
+        local okJ, data = pcall(function()
+            return game:GetService("HttpService"):JSONDecode(body)
+        end)
+        if okJ and type(data) == "table" then
+            for _, file in ipairs(data) do
+                local v = type(file) == "table" and type(file.name) == "string" and string.match(file.name, "^MM2_Helper_v(.+)%.lua$")
+                if v then table.insert(found, v) end
+            end
+        end
+    end
+    if #found == 0 then
+        for _, v in ipairs(FALLBACK_VERSIONS) do table.insert(found, v) end
+    end
+    table.sort(found, function(x, y) return versionKey(x) > versionKey(y) end)
+    return found
+end
+
+-- WORKING = downloads and compiles; NOT WORKING = downloads but has a syntax error; UNAVAILABLE = not in the repo
+local function checkVersion(ver)
+    local okF, src = pcall(fetch, "versions/MM2_Helper_v" .. ver .. ".lua")
+    if not okF or type(src) ~= "string" or #src < 500 then
+        return "UNAVAILABLE"
+    end
+    if not loadstring(src) then
+        return "NOT WORKING"
+    end
+    return "WORKING"
+end
+
+local STATUS_COLORS = {
+    WORKING = Color3.fromRGB(100, 255, 120),
+    ["NOT WORKING"] = Color3.fromRGB(255, 90, 90),
+    UNAVAILABLE = Color3.fromRGB(255, 90, 90),
+    LATEST = Color3.fromRGB(120, 200, 255),
+    CHECKING = Color3.fromRGB(150, 150, 165),
+}
+
+-- SWITCH VERSION: a corner button that slides up a list of versions (searchable, clickable)
 local function attachSwitcher()
     pcall(function()
         local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 5)
@@ -157,7 +206,7 @@ local function attachSwitcher()
         g.Parent = playerGui
 
         local button = Instance.new("TextButton")
-        button.Size = UDim2.fromOffset(120, 26)
+        button.Size = UDim2.fromOffset(130, 26)
         button.Position = UDim2.new(0, 10, 1, -40)
         button.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
         button.BorderSizePixel = 0
@@ -167,53 +216,187 @@ local function attachSwitcher()
         button.Font = Enum.Font.GothamBold
         button.Parent = g
 
+        local PANEL_H = 360
+        local shownPos = UDim2.new(0, 10, 1, -(PANEL_H + 46))
+        local hiddenPos = UDim2.new(0, 10, 1, 10)
+
         local panel = Instance.new("Frame")
-        panel.Size = UDim2.fromOffset(240, 104)
-        panel.Position = UDim2.new(0, 10, 1, -150)
+        panel.Name = "VersionList"
+        panel.Size = UDim2.fromOffset(280, PANEL_H)
+        panel.Position = hiddenPos
         panel.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
         panel.BorderSizePixel = 0
         panel.Visible = false
         panel.Parent = g
+        local panelCorner = Instance.new("UICorner")
+        panelCorner.CornerRadius = UDim.new(0, 8)
+        panelCorner.Parent = panel
 
-        local box = Instance.new("TextBox")
-        box.Size = UDim2.new(1, -16, 0, 28)
-        box.Position = UDim2.fromOffset(8, 8)
-        box.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-        box.BorderSizePixel = 0
-        box.Text = ""
-        box.PlaceholderText = "2.8, 3.4 ... or current"
-        box.TextColor3 = Color3.fromRGB(230, 230, 240)
-        box.TextScaled = true
-        box.ClearTextOnFocus = false
-        box.Parent = panel
+        local search = Instance.new("TextBox")
+        search.Size = UDim2.new(1, -16, 0, 28)
+        search.Position = UDim2.fromOffset(8, 8)
+        search.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        search.BorderSizePixel = 0
+        search.Text = ""
+        search.PlaceholderText = "search versions..."
+        search.TextColor3 = Color3.fromRGB(230, 230, 240)
+        search.TextScaled = true
+        search.ClearTextOnFocus = false
+        search.Parent = panel
 
-        local load = Instance.new("TextButton")
-        load.Size = UDim2.new(1, -16, 0, 28)
-        load.Position = UDim2.fromOffset(8, 42)
-        load.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
-        load.BorderSizePixel = 0
-        load.Text = "LOAD VERSION"
-        load.TextColor3 = Color3.fromRGB(20, 20, 30)
-        load.TextScaled = true
-        load.Font = Enum.Font.GothamBold
-        load.Parent = panel
+        local listFrame = Instance.new("ScrollingFrame")
+        listFrame.Size = UDim2.new(1, -16, 1, -92)
+        listFrame.Position = UDim2.fromOffset(8, 44)
+        listFrame.BackgroundTransparency = 1
+        listFrame.BorderSizePixel = 0
+        listFrame.ScrollBarThickness = 4
+        listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+        listFrame.Parent = panel
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Padding = UDim.new(0, 4)
+        layout.Parent = listFrame
 
-        local msg = Instance.new("TextLabel")
-        msg.Size = UDim2.new(1, -16, 0, 22)
-        msg.Position = UDim2.fromOffset(8, 76)
-        msg.BackgroundTransparency = 1
-        msg.Text = ""
-        msg.TextColor3 = Color3.fromRGB(200, 200, 210)
-        msg.TextScaled = true
-        msg.Parent = panel
+        local footer = Instance.new("TextLabel")
+        footer.Size = UDim2.new(1, -110, 0, 32)
+        footer.Position = UDim2.new(0, 8, 1, -40)
+        footer.BackgroundTransparency = 1
+        footer.Text = ""
+        footer.TextColor3 = Color3.fromRGB(200, 200, 210)
+        footer.TextScaled = true
+        footer.TextXAlignment = Enum.TextXAlignment.Left
+        footer.Parent = panel
 
+        local recheck = Instance.new("TextButton")
+        recheck.Size = UDim2.fromOffset(92, 30)
+        recheck.Position = UDim2.new(1, -100, 1, -38)
+        recheck.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+        recheck.BorderSizePixel = 0
+        recheck.Text = "↻ RECHECK"
+        recheck.TextColor3 = Color3.fromRGB(230, 230, 240)
+        recheck.TextScaled = true
+        recheck.Font = Enum.Font.GothamBold
+        recheck.Parent = panel
+
+        local statusLabels = {}
+
+        local function setStatusLabel(lbl, status)
+            lbl.Text = status
+            lbl.TextColor3 = STATUS_COLORS[status] or STATUS_COLORS.CHECKING
+        end
+
+        local function makeRow(ver, order, status)
+            local b = Instance.new("TextButton")
+            b.Name = ver
+            b.LayoutOrder = order
+            b.Size = UDim2.new(1, -4, 0, 34)
+            b.BackgroundColor3 = Color3.fromRGB(30, 30, 44)
+            b.BorderSizePixel = 0
+            b.Text = ""
+            b.Parent = listFrame
+
+            local name = Instance.new("TextLabel")
+            name.Size = UDim2.new(0.55, -8, 1, 0)
+            name.Position = UDim2.fromOffset(8, 0)
+            name.BackgroundTransparency = 1
+            name.Text = ver == "current" and "current (latest)" or ("v" .. ver)
+            name.TextColor3 = Color3.fromRGB(235, 235, 245)
+            name.TextScaled = true
+            name.Font = Enum.Font.GothamBold
+            name.TextXAlignment = Enum.TextXAlignment.Left
+            name.Parent = b
+
+            local st = Instance.new("TextLabel")
+            st.Size = UDim2.new(0.45, -8, 1, 0)
+            st.Position = UDim2.new(0.55, 0, 0, 0)
+            st.BackgroundTransparency = 1
+            st.TextScaled = true
+            st.Font = Enum.Font.GothamBold
+            st.TextXAlignment = Enum.TextXAlignment.Right
+            st.Parent = b
+            setStatusLabel(st, status)
+            statusLabels[ver] = st
+
+            b.MouseButton1Click:Connect(function()
+                footer.Text = "Loading " .. name.Text .. "..."
+                local _, msg = U.switch(ver)
+                footer.Text = tostring(msg)
+            end)
+            return b
+        end
+
+        local buildRows
+        buildRows = function(force)
+            if force then getgenv().MM2HubVersionCache = nil end
+            for _, child in ipairs(listFrame:GetChildren()) do
+                if child:IsA("TextButton") then child:Destroy() end
+            end
+            statusLabels = {}
+
+            local cache = getgenv().MM2HubVersionCache
+            if not cache then
+                cache = { list = listVersions(), status = {} }
+                getgenv().MM2HubVersionCache = cache
+            end
+
+            local pending = {}
+            makeRow("current", 0, "LATEST")
+            for i, ver in ipairs(cache.list) do
+                local status = cache.status[ver]
+                if not status then
+                    table.insert(pending, ver)
+                    status = "CHECKING"
+                end
+                makeRow(ver, i, status)
+            end
+
+            if #pending > 0 then
+                footer.Text = "Checking versions..."
+                task.spawn(function()
+                    for _, ver in ipairs(pending) do
+                        local status = checkVersion(ver)
+                        cache.status[ver] = status
+                        local lbl = statusLabels[ver]
+                        if lbl then setStatusLabel(lbl, status) end
+                    end
+                    footer.Text = "Click a version to switch"
+                end)
+            else
+                footer.Text = "Click a version to switch"
+            end
+        end
+
+        local open = false
+        local function setOpen(v)
+            open = v
+            if v then
+                panel.Visible = true
+                buildRows(false)
+            end
+            TweenService:Create(panel, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+                Position = v and shownPos or hiddenPos,
+            }):Play()
+            if not v then
+                task.delay(0.26, function()
+                    if not open then panel.Visible = false end
+                end)
+            end
+        end
         button.MouseButton1Click:Connect(function()
-            panel.Visible = not panel.Visible
+            setOpen(not open)
         end)
-        load.MouseButton1Click:Connect(function()
-            msg.Text = "Loading..."
-            local _, text = U.switch(box.Text)
-            msg.Text = tostring(text)
+        recheck.MouseButton1Click:Connect(function()
+            buildRows(true)
+        end)
+
+        search:GetPropertyChangedSignal("Text"):Connect(function()
+            local q = string.lower(search.Text):gsub("^%s*v?", ""):gsub("%s+$", "")
+            for _, child in ipairs(listFrame:GetChildren()) do
+                if child:IsA("TextButton") then
+                    child.Visible = q == "" or string.find(string.lower(child.Name), q, 1, true) ~= nil
+                end
+            end
         end)
     end)
 end
@@ -224,8 +407,6 @@ local function runAll(bundle)
     bgModule.baseUrl = BASE
     G.MM2HubBg = bgModule
     G.MM2HubGif = loadstring(bundle["gif_module.lua"])()
-    local morphModule = loadstring(bundle["morph.lua"])()
-    G.MM2HubMorph = morphModule
     local chunk, err = loadstring(bundle["MM2_Helper.lua"])
     if not chunk then error(err, 0) end
     chunk()
@@ -370,7 +551,6 @@ function U.switch(input)
     local bundle = {
         ["bg_module.lua"] = cur["bg_module.lua"],
         ["gif_module.lua"] = cur["gif_module.lua"],
-        ["morph.lua"] = cur["morph.lua"],
         ["MM2_Helper.lua"] = helper,
     }
 
