@@ -1,4 +1,4 @@
--- MM2 Helper v3.13 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.14 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.13"
+versionBadge.Text = "v3.14"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -4444,7 +4444,7 @@ local function toggleGame(key)
 end
 
 -- GAMES TAB
-do -- game menu: a card for each game
+;(function() -- game menu: a card for each game
     local ENTRIES = {
         { key = "STACK", icon = "🧱", name = "BLOCK STACK", desc = "Drop blocks onto the tower", color = COLOR_GOLD },
         { key = "OBBY", icon = "🏃", name = "OBBY RUN", desc = "Climb the platforms", color = Color3.fromRGB(80, 220, 120) },
@@ -4533,7 +4533,7 @@ do -- game menu: a card for each game
     if gamesPage:IsA("ScrollingFrame") then
         gamesPage.CanvasSize = UDim2.new(0, 0, 0, rows * CARD_H + 120)
     end
-end
+end)()
 
 local gamesInfo = Instance.new("TextLabel")
 gamesInfo.Size = UDim2.new(1, 0, 0, 80)
@@ -4708,7 +4708,7 @@ do -- ANIMATED UI toggle
         setStatus(settings.animatedUI and "Animated UI on" or "Animated UI off", COLOR_GREEN)
     end)
     if settingsPage:IsA("ScrollingFrame") then
-        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 800)
+        settingsPage.CanvasSize = UDim2.new(0, 0, 0, 830)
     end
 end
 
@@ -4881,17 +4881,17 @@ if loadingFinish then
 end
 
 -- ANIMATED BACKGROUND: started only when loader.lua provided the module
-do
+;(function()
     local env = getgenv and getgenv()
     if env and env.MM2HubBg then
         task.spawn(function()
             env.MM2HubBg.start(bgImage)
         end)
     end
-end
+end)()
 
 -- SETTINGS: main GUI key, version changer, refresh (one block, no new top-level locals)
-do
+;(function()
     settings.toggleKey = settings.toggleKey or "RightShift"
 
     local function keyFromName(text)
@@ -4968,7 +4968,140 @@ do
     settingLabel("SCRIPT VERSION (type 2.8, 3.4 ... or current)", 572)
     local verBox = settingBox("e.g. 2.8 or current", "", 590)
     local loadVerBtn = makeButton(settingsPage, "📂 LOAD VERSION", 630, Color3.fromRGB(120, 200, 255))
-    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.12)", 680, COLOR_GOLD)
+
+    -- tiny VIEW ERROR button, only shown after a version failed to load
+    local viewErrBtn = Instance.new("TextButton")
+    viewErrBtn.Size = UDim2.fromOffset(120, 20)
+    viewErrBtn.Position = UDim2.fromOffset(0, 676)
+    viewErrBtn.BackgroundColor3 = Color3.fromRGB(90, 30, 40)
+    viewErrBtn.BorderSizePixel = 0
+    viewErrBtn.AutoButtonColor = false
+    viewErrBtn.Text = "VIEW ERROR"
+    viewErrBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
+    viewErrBtn.TextScaled = true
+    viewErrBtn.Font = activeFont
+    viewErrBtn.ZIndex = 4
+    viewErrBtn.Visible = getgenv().MM2HubLastError ~= nil
+    viewErrBtn.Parent = settingsPage
+    corner(viewErrBtn, 5)
+
+    -- ERROR VIEWER: a small notepad with the failed version's code, the error and a possible fix
+    local notepad = Instance.new("Frame")
+    notepad.Name = "ErrorNotepad"
+    notepad.Size = UDim2.fromOffset(330, 320)
+    notepad.Position = UDim2.fromOffset(30, 60)
+    notepad.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+    notepad.BorderSizePixel = 0
+    notepad.Active = true
+    notepad.Draggable = true
+    notepad.Visible = false
+    notepad.ZIndex = 50
+    notepad.Parent = screenGui
+    corner(notepad, 8)
+
+    local nTitle = Instance.new("TextLabel")
+    nTitle.Size = UDim2.new(1, -50, 0, 26)
+    nTitle.Position = UDim2.fromOffset(10, 6)
+    nTitle.BackgroundTransparency = 1
+    nTitle.Text = "ERROR VIEWER"
+    nTitle.TextColor3 = COLOR_TEXT
+    nTitle.TextScaled = true
+    nTitle.Font = activeFont
+    nTitle.TextXAlignment = Enum.TextXAlignment.Left
+    nTitle.ZIndex = 51
+    nTitle.Parent = notepad
+
+    local nClose = Instance.new("TextButton")
+    nClose.Size = UDim2.fromOffset(26, 26)
+    nClose.Position = UDim2.new(1, -32, 0, 6)
+    nClose.BackgroundColor3 = Color3.fromRGB(60, 30, 40)
+    nClose.BorderSizePixel = 0
+    nClose.Text = "X"
+    nClose.TextColor3 = COLOR_TEXT
+    nClose.TextScaled = true
+    nClose.Font = activeFont
+    nClose.ZIndex = 51
+    nClose.Parent = notepad
+    corner(nClose, 6)
+
+    local nScroll = Instance.new("ScrollingFrame")
+    nScroll.Size = UDim2.new(1, -16, 1, -44)
+    nScroll.Position = UDim2.fromOffset(8, 38)
+    nScroll.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
+    nScroll.BorderSizePixel = 0
+    nScroll.ScrollBarThickness = 4
+    nScroll.AutomaticCanvasSize = Enum.AutomaticSize.XY
+    nScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    nScroll.ZIndex = 51
+    nScroll.Parent = notepad
+    corner(nScroll, 6)
+
+    local code = Instance.new("TextLabel")
+    code.Position = UDim2.fromOffset(6, 6)
+    code.Size = UDim2.new(0, 0, 0, 0)
+    code.AutomaticSize = Enum.AutomaticSize.XY
+    code.BackgroundTransparency = 1
+    code.TextWrapped = false
+    code.TextXAlignment = Enum.TextXAlignment.Left
+    code.TextYAlignment = Enum.TextYAlignment.Top
+    code.Font = Enum.Font.Code
+    code.TextSize = 12
+    code.TextColor3 = Color3.fromRGB(220, 220, 230)
+    code.ZIndex = 52
+    code.Text = ""
+    code.Parent = nScroll
+
+    getgenv().MM2HubClick(nClose, "MouseButton1Click", function()
+        notepad.Visible = false
+    end)
+
+    local function repairFor(err)
+        if string.find(err, "exceeded limit 200", 1, true) or string.find(err, "too many local variables", 1, true) then
+            return "POSSIBLE FIX: one block has more than 200 local variables. Wrap that block in (function() ... end)() so its locals get their own space, or move some top-level locals into a table."
+        end
+        if string.find(err, "'end' expected", 1, true) then
+            return "POSSIBLE FIX: an 'end' is missing. Check the last function, if, for or do block above the error line."
+        end
+        if string.find(err, "unfinished", 1, true) or string.find(err, "unexpected symbol", 1, true) then
+            return "POSSIBLE FIX: a bracket, quote or 'end' is unbalanced near the error line."
+        end
+        return "POSSIBLE FIX: look at the error line for a typo, a missing ')' or 'then', or an unfinished statement."
+    end
+
+    local function openErrorViewer()
+        local info = getgenv().MM2HubLastError
+        if not info then
+            setStatus("No error saved", COLOR_DIM)
+            return
+        end
+        local src = {}
+        for l in string.gmatch(info.source .. "\n", "([^\n]*)\n") do
+            table.insert(src, l)
+        end
+        local out = { "v" .. info.ver .. ": " .. info.error, "" }
+        local line = tonumber(string.match(info.error, ":(%d+):"))
+        if line then
+            table.insert(out, "AT LINE " .. line .. ":")
+            for i = math.max(1, line - 4), math.min(#src, line + 4) do
+                table.insert(out, string.format("%s %5d | %s", i == line and ">>" or "  ", i, src[i]))
+            end
+            table.insert(out, "")
+        end
+        table.insert(out, repairFor(info.error))
+        table.insert(out, "")
+        table.insert(out, "FULL CODE:")
+        for i, l in ipairs(src) do
+            table.insert(out, string.format("%5d | %s", i, l))
+        end
+        local text = table.concat(out, "\n")
+        if #text > 190000 then
+            text = string.sub(text, 1, 190000) .. "\n... (cut off, Roblox text limit)"
+        end
+        code.Text = text
+        nTitle.Text = "ERROR: v" .. info.ver
+        notepad.Visible = true
+    end
+    getgenv().MM2HubClick(viewErrBtn, "MouseButton1Click", openErrorViewer)
 
     local function loadVersion(text)
         local switch = getgenv().MM2HubSwitch
@@ -4979,12 +5112,16 @@ do
         setStatus("Loading " .. tostring(text) .. "...", COLOR_DIM)
         local ok, msg = switch(text)
         if not ok then setStatus(msg, COLOR_RED) end
+        viewErrBtn.Visible = getgenv().MM2HubLastError ~= nil
     end
-    getgenv().MM2HubClick(loadVerBtn, "MouseButton1Up", function() loadVersion(verBox.Text) end)
-    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Up", function() loadVersion("3.12") end)
+    getgenv().MM2HubClick(loadVerBtn, "MouseButton1Click", function() loadVersion(verBox.Text) end)
+
+    -- 3.10 is the newest copy that loads without errors
+    local prevVerBtn = makeButton(settingsPage, "⏪ PREVIOUS VERSION (3.10)", 702, COLOR_GOLD)
+    getgenv().MM2HubClick(prevVerBtn, "MouseButton1Click", function() loadVersion("3.10") end)
 
     -- REFRESH: checks GitHub, reloads only when the repo changed
-    local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 730, COLOR_GREEN)
+    local refreshBtn = makeButton(settingsPage, "⟳ REFRESH (CHECK FOR UPDATE)", 752, COLOR_GREEN)
     getgenv().MM2HubClick(refreshBtn, "MouseButton1Up", function()
         local refresh = getgenv().MM2HubRefresh
         if not refresh then
@@ -4999,11 +5136,11 @@ do
             setStatus(msg, COLOR_DIM)
         end
     end)
-end
+end)()
 
 if getgenv().MM2HubNotice then
     setStatus(getgenv().MM2HubNotice, COLOR_GOLD)
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.13 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.14 Loaded - tween coins, reach, live Show Both, games, free-look invis")
