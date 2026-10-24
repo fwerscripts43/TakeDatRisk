@@ -276,8 +276,9 @@ function U.switch(input)
     end
     local fn, err = loadstring(helper)
     if not fn then
+        getgenv().MM2HubLastError = { ver = ver, source = helper, error = tostring(err) }
         warn("MM2 Hub: v" .. ver .. " syntax error: " .. tostring(err))
-        return false, "v" .. ver .. " has a syntax error"
+        return false, "v" .. ver .. " has a syntax error!"
     end
 
     local cur = getgenv().MM2HubSrc
@@ -297,9 +298,11 @@ function U.switch(input)
     local ok, e = pcall(runAll, bundle)
     getgenv().MM2HubSrc = nil -- the next REFRESH reloads the repo's current version
     if ok then
+        getgenv().MM2HubLastError = nil
         return true, "Loaded v" .. ver
     end
 
+    getgenv().MM2HubLastError = { ver = ver, source = helper, error = tostring(e) }
     warn("MM2 Hub: v" .. ver .. " failed to start: " .. tostring(e))
     teardown()
     getgenv().MM2HubNotice = "v" .. ver .. " failed to start, restored the current version"
