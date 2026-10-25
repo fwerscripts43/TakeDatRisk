@@ -125,6 +125,7 @@ end
 -- stop everything the running copy started, so nothing stacks after a reload
 local function teardown()
     local G = getgenv()
+    if G.MM2HubWindUIClose then pcall(G.MM2HubWindUIClose) end -- closes the WindUI hub if it's open
     G.MM2HubGen = (G.MM2HubGen or 0) + 1 -- every loop from the running copy sees this and stops
     if G.MM2HubBg then pcall(function() G.MM2HubBg.stop() end) end
     if G.MM2HubGif then pcall(function() G.MM2HubGif.stop() end) end
@@ -141,8 +142,10 @@ local function teardown()
     if blur then blur:Destroy() end
 end
 
+getgenv().MM2HubTeardown = teardown
+
 -- VERSIONS: the repo's versions/ folder (newest first), with a check of which ones work
-local FALLBACK_VERSIONS = { "2.8", "2.9", "3.0", "3.2", "3.4", "3.5", "3.6", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17" }
+local FALLBACK_VERSIONS = { "2.8", "2.9", "3.0", "3.2", "3.4", "3.5", "3.6", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15", "3.16", "3.17", "3.18" }
 
 local function versionKey(v)
     local a, b = string.match(v, "^(%d+)%.(%d+)")
