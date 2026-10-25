@@ -1,4 +1,4 @@
--- MM2 Helper v3.17 (tabbed, seasonal themes, games)
+-- MM2 Helper v3.18 (tabbed, seasonal themes, games)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -358,7 +358,7 @@ local versionBadge = Instance.new("TextLabel")
 versionBadge.Size = UDim2.new(0, 40, 0, 18)
 versionBadge.Position = UDim2.new(1, -50, 0.5, -9)
 versionBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 48)
-versionBadge.Text = "v3.17"
+versionBadge.Text = "v3.18"
 versionBadge.TextColor3 = COLOR_DIM
 versionBadge.TextScaled = true
 versionBadge.Font = activeFont
@@ -367,7 +367,7 @@ versionBadge.Parent = headerBar
 corner(versionBadge, 5)
 
 -- PAGES + TABS
-local TAB_NAMES = { "ESP", "COMBAT", "PLAYER", "GAMES", "SETTINGS" }
+local TAB_NAMES = { "ESP", "COMBAT", "PLAYER", "GAMES", "SETTINGS", "UI" }
 local tabButtons, pages = {}, {}
 
 local function makePage(name, scroll)
@@ -398,6 +398,7 @@ makePage("COMBAT", true)
 makePage("PLAYER", false)
 makePage("GAMES", true)
 makePage("SETTINGS", true)
+makePage("UI", false)
 
 local activeTab = "ESP"
 
@@ -416,8 +417,8 @@ end
 
 for i, name in ipairs(TAB_NAMES) do
     local tb = Instance.new("TextButton")
-    tb.Size = UDim2.new(0.2, -8, 0, 30)
-    tb.Position = UDim2.new((i - 1) * 0.2, 4, 0, 56)
+    tb.Size = UDim2.new(1 / #TAB_NAMES, -8, 0, 30)
+    tb.Position = UDim2.new((i - 1) / #TAB_NAMES, 4, 0, 56)
     tb.BackgroundColor3 = Color3.fromRGB(24, 24, 36)
     tb.BorderSizePixel = 0
     tb.AutoButtonColor = false
@@ -1492,7 +1493,7 @@ do
         local w = rgbBorder.AbsoluteSize.X
         local y = rgbBorder.AbsolutePosition.Y + 40
         local hiddenX = x + w - 24
-        local shownX = x + w + 8
+        local shownX = math.max(hiddenX, math.min(x + w + 8, workspace.CurrentCamera.ViewportSize.X - 200))
         panel.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
         panel.Visible = rgbBorder.Visible
     end)
@@ -1697,14 +1698,16 @@ local function autoGunLoop()
                 setStatus("Grabbing the gun...", COLOR_BLUE)
                 hrp.CFrame = drop.CFrame + Vector3.new(0, 3, 0)
                 hrp.AssemblyLinearVelocity = Vector3.zero
-                task.wait(0.2)
+                -- wait two physics steps so the touch on the gun registers, then snap back instantly
+                RunService.Heartbeat:Wait()
+                RunService.Heartbeat:Wait()
                 local nowChar = player.Character
                 local nowHrp = nowChar and nowChar:FindFirstChild("HumanoidRootPart")
                 if nowHrp then
                     nowHrp.CFrame = backCF
                     nowHrp.AssemblyLinearVelocity = Vector3.zero
                 end
-                task.wait(1.5) -- let the pickup finish before trying again
+                task.wait(0.5) -- short pause so the pickup can finish before retrying
             end
         end
     end
@@ -1911,10 +1914,10 @@ do
         local base = settings.uiScale or 1
         if settings.animatedUI then
             local t = os.clock() - t0
-            uiScale.Scale = base * (1 + 0.015 * math.sin(t * 2.5))
+            uiScale.Scale = base * (1 + 0.015 * math.sin(t * 2.5)) * (getgenv().MM2HubFit or 1)
             rgbGrad.Rotation = (t * 40) % 360
         else
-            uiScale.Scale = base
+            uiScale.Scale = base * (getgenv().MM2HubFit or 1)
         end
     end)
 end
@@ -2050,7 +2053,7 @@ getgenv().MM2HubBind(RunService.RenderStepped, function(dt)
     local w = rgbBorder.AbsoluteSize.X
     local y = rgbBorder.AbsolutePosition.Y + 40
     local hiddenX = x + w - 24
-    local shownX = x + w + 8
+    local shownX = math.max(hiddenX, math.min(x + w + 8, workspace.CurrentCamera.ViewportSize.X - 200))
     reachPopup.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
     reachPopup.Visible = rgbBorder.Visible
 end)
@@ -2165,7 +2168,7 @@ do
             local w = rgbBorder.AbsoluteSize.X
             local y = rgbBorder.AbsolutePosition.Y + 40
             local hiddenX = x + w - 24
-            local shownX = x + w + 8
+            local shownX = math.max(hiddenX, math.min(x + w + 8, workspace.CurrentCamera.ViewportSize.X - 200))
             panel.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
             panel.Visible = true
         end)
@@ -2655,7 +2658,7 @@ do
         local w = rgbBorder.AbsoluteSize.X
         local y = rgbBorder.AbsolutePosition.Y + 40
         local hiddenX = x + w - 24
-        local shownX = x + w + 8
+        local shownX = math.max(hiddenX, math.min(x + w + 8, workspace.CurrentCamera.ViewportSize.X - 200))
         panel.Position = UDim2.fromOffset(hiddenX + (shownX - hiddenX) * eased, y)
         panel.Visible = true
     end)
@@ -4859,6 +4862,75 @@ end
     end
 end)()
 
+-- MOBILE: fits the window to small screens and adds a floating MM2 button (no keyboard on phones)
+;(function()
+    local UIS = game:GetService("UserInputService")
+    local isMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+    if not isMobile then return end
+
+    local function fitNow()
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        local vp = cam.ViewportSize
+        local fit = math.min(1, (vp.X - 16) / 316, (vp.Y - 70) / 478)
+        getgenv().MM2HubFit = math.max(0.5, fit)
+        rgbBorder.Position = UDim2.new(0.5, -158, 0, 44)
+        uiScale.Scale = (settings.uiScale or 1) * getgenv().MM2HubFit
+    end
+    fitNow()
+    task.spawn(function()
+        while not workspace.CurrentCamera do task.wait() end
+        getgenv().MM2HubBind(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"), fitNow)
+    end)
+
+    local btn = Instance.new("TextButton")
+    btn.Name = "MM2HubMobileToggle"
+    btn.Size = UDim2.fromOffset(48, 48)
+    btn.Position = UDim2.new(1, -58, 0.5, -24)
+    btn.BackgroundColor3 = Color3.fromRGB(255, 0, 128)
+    btn.BorderSizePixel = 0
+    btn.Text = "MM2"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 50
+    btn.Parent = screenGui
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(1, 0)
+    c.Parent = btn
+
+    getgenv().MM2HubClick(btn, "MouseButton1Click", function()
+        if not getgenv().MM2HubShown then return end
+        rgbBorder.Visible = not rgbBorder.Visible
+    end)
+end)()
+
+-- UI TAB: switches the whole hub to the WindUI version (MM2_Hub_WindUI.lua in the repo)
+do
+    local uiPage = pages.UI
+    local windBtn = makeButton(uiPage, "🪟 WINDUI HUB", 0, Color3.fromRGB(120, 200, 255))
+    getgenv().MM2HubClick(windBtn, "MouseButton1Click", function()
+        local base = getgenv().MM2HubBase or "https://raw.githubusercontent.com/fwerscripts43/TakeDatRisk/main/"
+        setStatus("Loading WindUI hub...", COLOR_BLUE)
+        local okSrc, src = pcall(game.HttpGet, game, base .. "MM2_Hub_WindUI.lua?cb=" .. tostring(os.time()))
+        if not okSrc or type(src) ~= "string" or #src < 200 then
+            setStatus("Couldn't download the WindUI hub", COLOR_RED)
+            return
+        end
+        local fn, err = loadstring(src)
+        if not fn then
+            setStatus("WindUI hub has a syntax error", COLOR_RED)
+            warn(tostring(err))
+            return
+        end
+        if getgenv().MM2HubTeardown then getgenv().MM2HubTeardown() end
+        task.spawn(function()
+            local ok, e = pcall(fn)
+            if not ok then warn("WindUI hub error: " .. tostring(e)) end
+        end)
+    end)
+end
+
 -- SETTINGS: main GUI key, version changer, refresh (one block, no new top-level locals)
 ;(function()
     settings.toggleKey = settings.toggleKey or "RightShift"
@@ -5112,4 +5184,4 @@ if getgenv().MM2HubNotice then
     getgenv().MM2HubNotice = nil
 end
 
-print("MM2 Helper v3.17 Loaded - tween coins, reach, live Show Both, games, free-look invis")
+print("MM2 Helper v3.18 Loaded - tween coins, reach, live Show Both, games, free-look invis")
