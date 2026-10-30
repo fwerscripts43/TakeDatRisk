@@ -552,7 +552,7 @@ local function hasToolMatching(plr, keyword)
         end
         return false
     end
-    return search(plr.Character) or search(plr.Backpack)
+    return search(plr.Character) or search(plr:FindFirstChildOfClass("Backpack"))
 end
 
 local function findPlayerByTool(keyword, excludeSelf)
@@ -565,6 +565,11 @@ local function findPlayerByTool(keyword, excludeSelf)
 end
 
 local function findMurderer()
+    -- in an infection round there is no murderer: the zombies (knife holders) take that role
+    if getgenv().MM2HubInfection and getgenv().MM2HubZombies then
+        local zombies = getgenv().MM2HubZombies()
+        return zombies[1]
+    end
     return findPlayerByTool("knife", true)
 end
 
@@ -592,7 +597,7 @@ local function findOwnTool(keyword)
         end
         return nil
     end
-    return (char and search(char)) or search(player.Backpack)
+    return (char and search(char)) or search(player:FindFirstChildOfClass("Backpack"))
 end
 
 local function outlinePlayer(plr, on, color)
@@ -719,6 +724,9 @@ do
     local killed = {} -- [Player] = true once a kill has been seen this round
     getgenv().MM2HubKilled = killed
     getgenv().MM2HubInfection = false
+    local roundStartFns, roundEndFns = {}, {} -- other features register callbacks here
+    getgenv().MM2HubRoundStartFns = roundStartFns
+    getgenv().MM2HubRoundEndFns = roundEndFns
 
     local function toPlayer(v)
         if typeof(v) ~= "Instance" then return nil end
@@ -746,6 +754,7 @@ do
                 if getgenv().MM2HubInfection then
                     setStatus("Infection mode: everyone with a knife is a ZOMBIE", COLOR_GREEN)
                 end
+                for _, f in ipairs(roundStartFns) do pcall(f) end
             end)
         end
     end
@@ -760,6 +769,15 @@ do
         scan(d)
     end
     getgenv().MM2HubBind(replicated.DescendantAdded, scan)
+
+    -- round end: Insight.RoundPlayed fires when a round finishes
+    local insight = replicated:FindFirstChild("Insight")
+    local played = insight and insight:FindFirstChild("RoundPlayed")
+    if played and played:IsA("BindableEvent") then
+        getgenv().MM2HubBind(played.Event, function()
+            for _, f in ipairs(roundEndFns) do pcall(f) end
+        end)
+    end
 end
 
 do -- ZOMBIES (Infection): anyone holding a knife. Empty unless the map is Infection.
@@ -1109,7 +1127,7 @@ local function aimEquipGun()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not hum then return nil end
     if not char:FindFirstChild("Gun") then
-        local bp = player.Backpack:FindFirstChild("Gun")
+        local bp = (player:FindFirstChildOfClass("Backpack") and player:FindFirstChildOfClass("Backpack"):FindFirstChild("Gun"))
         if bp then
             hum:EquipTool(bp)
             task.wait(0.05)
@@ -1748,11 +1766,15 @@ local function setReach(plr, on)
 
     if on then
         if not saved or saved.hrp ~= hrp then
-            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, collide = {} }
+            saved = { hrp = hrp, size = hrp.Size, transparency = hrp.Transparency, collide = {},
+                massless = hrp.Massless, canTouch = hrp.CanTouch }
             reachOriginal[plr] = saved
         end
         hrp.Size = reachVector()
         hrp.Transparency = 0.7
+        -- a big heavy part can shove you when it overlaps: make it weightless and untouchable
+        hrp.Massless = true
+        hrp.CanTouch = false
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") then
                 if saved.collide[part] == nil then
@@ -1764,6 +1786,8 @@ local function setReach(plr, on)
     elseif saved and saved.hrp == hrp then
         hrp.Size = saved.size
         hrp.Transparency = saved.transparency
+        hrp.Massless = saved.massless
+        hrp.CanTouch = saved.canTouch
         for part, cc in pairs(saved.collide) do
             if part.Parent then
                 part.CanCollide = cc
@@ -2425,7 +2449,7 @@ local function tweenToCoin(root, coin)
     end)
     tween:Play()
     local t = 0
-    while not done and autoCoinOn and coin.Parent and t < duration + 1 and HUB_GEN == getgenv().MM2HubGen do
+    while not done and autoCoinOn and coin.Parent and t < duration + 1 and HUB_GEN == getgenv().MM2HubGen and not getgenv().MM2HubCoinHide do
         task.wait(0.05)
         t = t + 0.05
     end
@@ -2444,6 +2468,72 @@ local function autoCoinLoop()
         setStatus("CoinCollected remote not found, using coin removal instead.", Color3.fromRGB(255, 200, 50))
     end
 
+    -- KILL PROTECTION: when the murderer (or a zombie) gets close, the character anchors
+    -- under the map until they leave. Coins are collected again once it's clear.
+    local HIDE_DEPTH = 60
+    local KILL_RANGE = 35
+    local hiddenRoot, hiddenFrom = nil, nil
+    local function coinKillHide(root)
+        if getgenv().MM2HubCoinHide and hiddenRoot ~= root then
+            getgenv().MM2HubCoinHide = false -- the character respawned while hidden
+        end
+        if not settings.coinKillProtect then
+            if getgenv().MM2HubCoinHide and hiddenRoot then
+                pcall(function() hiddenRoot.Anchored = false; hiddenRoot.CFrame = hiddenFrom end)
+                getgenv().MM2HubCoinHide = false
+            end
+            return false
+        end
+        local hidden = getgenv().MM2HubCoinHide
+        -- measure from the spot above ground, not from under the map
+        local refPos = (hidden and hiddenFrom) and hiddenFrom.Position or root.Position
+        local m = findMurderer()
+        local mRoot = m and m.Character and m.Character:FindFirstChild("HumanoidRootPart")
+        local near = mRoot ~= nil and (mRoot.Position - refPos).Magnitude <= KILL_RANGE
+        if near and not hidden then
+            getgenv().MM2HubCoinHide = true
+            hiddenRoot = root
+            hiddenFrom = root.CFrame
+            root.Anchored = true
+            root.CFrame = CFrame.new(root.Position.X, root.Position.Y - HIDE_DEPTH, root.Position.Z)
+            setStatus("Kill protection: hiding under the map", COLOR_RED)
+        elseif not near and hidden then
+            getgenv().MM2HubCoinHide = false
+            root.Anchored = false
+            root.CFrame = hiddenFrom
+            setStatus("Kill protection: clear, back to coins", COLOR_GOLD)
+        end
+        return getgenv().MM2HubCoinHide
+    end
+
+    -- while hidden: rise just above the nearest close coin so it touches the hitbox, then drop back
+    local function hideGrab(root)
+        if not hiddenFrom then return end
+        local nearest, best = nil, 25
+        for _, c in ipairs(getCoins()) do
+            if c.Parent then
+                local d = (c.Position - hiddenFrom.Position).Magnitude
+                if d < best then best, nearest = d, c end
+            end
+        end
+        if not nearest then return end
+        local fired = false
+        local conn = coinSignal.Event:Connect(function() fired = true end)
+        root.Anchored = false -- anchored parts don't fire Touched, so unanchor for the grab
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.CFrame = CFrame.new(nearest.Position + Vector3.new(0, 3, 0))
+        local t = 0
+        while not fired and t < 0.4 and nearest.Parent and autoCoinOn do
+            task.wait(0.05)
+            t = t + 0.05
+        end
+        conn:Disconnect()
+        if getgenv().MM2HubCoinHide and root.Parent then
+            root.Anchored = true
+            root.CFrame = CFrame.new(hiddenFrom.Position.X, hiddenFrom.Position.Y - HIDE_DEPTH, hiddenFrom.Position.Z)
+        end
+    end
+
     local skipped = {}
     while autoCoinOn and HUB_GEN == getgenv().MM2HubGen do
         local char = player.Character
@@ -2451,6 +2541,9 @@ local function autoCoinLoop()
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not hum or hum.Health <= 0 then
             task.wait(0.5)
+        elseif coinKillHide(root) then
+            hideGrab(root)
+            task.wait(0.2)
         else
             local coins = getCoins()
             local candidates = {}
@@ -2497,6 +2590,11 @@ local function autoCoinLoop()
     end
 
     if remoteConn then remoteConn:Disconnect() end
+    -- never leave the character anchored under the map when auto coin stops
+    if getgenv().MM2HubCoinHide and hiddenRoot then
+        pcall(function() hiddenRoot.Anchored = false; hiddenRoot.CFrame = hiddenFrom end)
+    end
+    getgenv().MM2HubCoinHide = false
     coinRunning = false
 end
 
@@ -2522,7 +2620,7 @@ do
     local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 
     local panel = Instance.new("Frame")
-    panel.Size = UDim2.new(0, 170, 0, 250)
+    panel.Size = UDim2.new(0, 170, 0, 332)
     panel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
     panel.BorderSizePixel = 0
     panel.Visible = false
@@ -2633,11 +2731,15 @@ do
 
     local onOffBtn = pbtn(122, "START", activeThemeDef.accent)
     local waitBtn = pbtn(164, "WAIT: ON", Color3.fromRGB(40, 40, 60))
-    local doneBtn = pbtn(206, "DONE", Color3.fromRGB(24, 24, 36))
+    local killBtn = pbtn(206, "KILL PROTECT: OFF", Color3.fromRGB(40, 40, 60))
+    local roundBtn = pbtn(248, "EACH ROUND: OFF", Color3.fromRGB(40, 40, 60))
+    local doneBtn = pbtn(290, "DONE", Color3.fromRGB(24, 24, 36))
 
     local function refresh()
         onOffBtn.Text = autoCoinOn and "STOP" or "START"
         waitBtn.Text = "WAIT: " .. (settings.coinWait ~= false and "ON" or "OFF")
+        roundBtn.Text = "EACH ROUND: " .. (coinRoundMode and "ON" or "OFF")
+        killBtn.Text = "KILL PROTECT: " .. (settings.coinKillProtect and "ON" or "OFF")
         setCoinSpeed(settings.coinSpeed or COIN_SPEED)
     end
 
@@ -2668,11 +2770,52 @@ do
         refresh()
     end
 
+    -- EACH ROUND mode: Auto Coin runs from the round start until the round ends
+    local coinRoundMode = settings.coinRound == true
+    local roundActive = false
+    local function setCoinRunning(on)
+        autoCoinOn = on
+        if on and not coinRunning then
+            coinRunning = true
+            task.spawn(autoCoinLoop)
+        end
+    end
+    local function setCoinRound(on)
+        coinRoundMode = on
+        settings.coinRound = on
+        saveSettings()
+        if on then
+            if roundActive then setCoinRunning(true) end
+            autoCoinBtn.Text = "🪙 AUTO COIN: EACH ROUND"
+            setStatus("Auto Coin runs each round", COLOR_GOLD)
+        else
+            setCoinRunning(false)
+            autoCoinBtn.Text = "🪙 AUTO COIN"
+            setStatus("Auto Coin each round OFF")
+        end
+        setToggleVisual(autoCoinStroke, on)
+    end
+    table.insert(getgenv().MM2HubRoundStartFns, function()
+        roundActive = true
+        if coinRoundMode then setCoinRunning(true) end
+    end)
+    table.insert(getgenv().MM2HubRoundEndFns, function()
+        roundActive = false
+        if coinRoundMode and autoCoinOn then
+            setCoinRunning(false)
+            setStatus("Round ended, Auto Coin stopped", COLOR_GOLD)
+        end
+    end)
+    if coinRoundMode then
+        autoCoinBtn.Text = "🪙 AUTO COIN: EACH ROUND"
+        setToggleVisual(autoCoinStroke, true)
+    end
+
     getgenv().MM2HubClick(autoCoinBtn, "MouseButton1Click", function()
         if isMobile then
             openPanel()
         else
-            toggleCoin()
+            setCoinRound(not coinRoundMode)
         end
         refresh()
     end)
@@ -2684,6 +2827,15 @@ do
     getgenv().MM2HubClick(waitBtn, "MouseButton1Click", function()
         settings.coinWait = not (settings.coinWait ~= false)
         saveSettings()
+        refresh()
+    end)
+    getgenv().MM2HubClick(killBtn, "MouseButton1Click", function()
+        settings.coinKillProtect = not settings.coinKillProtect
+        saveSettings()
+        refresh()
+    end)
+    getgenv().MM2HubClick(roundBtn, "MouseButton1Click", function()
+        setCoinRound(not coinRoundMode)
         refresh()
     end)
     getgenv().MM2HubClick(doneBtn, "MouseButton1Click", function()
@@ -2734,6 +2886,62 @@ do
             setAnimateDisabled(player.Character, false)
         end
         setStatus(on and "No Anim ON" or "No Anim OFF", on and COLOR_RED or COLOR_DIM)
+    end)
+end
+
+-- ANTI FLING: keeps your character from being launched (toggle)
+-- 1) your own spin and launch speed are capped every physics step
+-- 2) other players' parts stop colliding with you on your client, so they can't push you
+do
+    local on = settings.antiFling == true
+    local flingBtn, flingStroke = makeButton(playerPage, "🛡 ANTI FLING", 300, Color3.fromRGB(90, 200, 255))
+    setToggleVisual(flingStroke, on)
+    local MAX_SPEED = 120 -- studs/sec, high enough that normal falls are untouched
+    local MAX_SPIN = 6    -- rad/sec, a normal character never gets near this
+    local softened = {}   -- parts whose CanCollide we turned off, so we can restore them
+
+    local function restoreOthers()
+        for part in pairs(softened) do
+            if part.Parent then pcall(function() part.CanCollide = true end) end
+            softened[part] = nil
+        end
+    end
+
+    getgenv().MM2HubBind(RunService.Stepped, function()
+        if not on then return end
+        local myChar = player.Character
+        if myChar then
+            for _, part in ipairs(myChar:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if part.AssemblyAngularVelocity.Magnitude > MAX_SPIN then
+                        part.AssemblyAngularVelocity = Vector3.zero
+                    end
+                    local lv = part.AssemblyLinearVelocity
+                    if lv.Magnitude > MAX_SPEED then
+                        part.AssemblyLinearVelocity = lv.Unit * MAX_SPEED
+                    end
+                end
+            end
+        end
+        for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+            if plr ~= player and plr.Character then
+                for _, part in ipairs(plr.Character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                        softened[part] = true
+                    end
+                end
+            end
+        end
+    end)
+
+    getgenv().MM2HubClick(flingBtn, "MouseButton1Click", function()
+        on = not on
+        settings.antiFling = on
+        saveSettings()
+        setToggleVisual(flingStroke, on)
+        if not on then restoreOthers() end
+        setStatus(on and "Anti Fling ON" or "Anti Fling OFF", on and COLOR_GREEN or COLOR_DIM)
     end)
 end
 
@@ -4416,6 +4624,702 @@ local function toggleGame(key)
 end
 
 -- GAMES TAB
+-- PRACTICE KNIFE THROW: a private range far above the map. Bots, the knife and every hit
+-- are local only. Nothing is sent to the server, so other players are never affected.
+do
+    local RANGE_CENTER = Vector3.new(0, 4000, 0)
+    local THROW_SPEED = 150
+    local GRAVITY = 25
+    local THROW_CHARGE = 1 -- same as the real knife's ThrowSpeed attribute
+    local THROW_COOLDOWN = 2 * THROW_CHARGE -- the real knife waits 2x ThrowSpeed
+    local BOT_RESPAWN = 2
+    local FALL_TIME = 0.3
+    local STICK_TIME = 2.5
+
+    local function makePart(parent, props)
+        local p = Instance.new("Part")
+        p.Anchored = true
+        p.CanCollide = true
+        p.TopSurface = Enum.SurfaceType.Smooth
+        p.BottomSurface = Enum.SurfaceType.Smooth
+        p.Material = Enum.Material.SmoothPlastic
+        for k, v in pairs(props) do p[k] = v end
+        p.Parent = parent
+        return p
+    end
+
+    -- builds the range: floor, lane lines, walls and a sign (all local)
+    local function buildRange(rangeFolder)
+        local geo = Instance.new("Folder")
+        geo.Name = "Geometry"
+        geo.Parent = rangeFolder
+        local o = RANGE_CENTER
+        makePart(geo, { Name = "Floor", Size = Vector3.new(160, 2, 200), CFrame = CFrame.new(o + Vector3.new(0, -1, 40)), Color = Color3.fromRGB(70, 75, 90) })
+        makePart(geo, { Name = "Lane", Size = Vector3.new(6, 0.1, 200), CFrame = CFrame.new(o + Vector3.new(0, 0.05, 40)), Color = Color3.fromRGB(255, 200, 60), Material = Enum.Material.Neon, CanCollide = false })
+        for _, x in ipairs({ -26, 26 }) do
+            makePart(geo, { Name = "Stripe", Size = Vector3.new(1, 0.1, 200), CFrame = CFrame.new(o + Vector3.new(x, 0.05, 40)), Color = Color3.fromRGB(200, 200, 220), CanCollide = false })
+        end
+        local back = makePart(geo, { Name = "BackWall", Size = Vector3.new(160, 40, 2), CFrame = CFrame.new(o + Vector3.new(0, 20, 141)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "LeftWall", Size = Vector3.new(2, 40, 200), CFrame = CFrame.new(o + Vector3.new(-80, 20, 40)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "RightWall", Size = Vector3.new(2, 40, 200), CFrame = CFrame.new(o + Vector3.new(80, 20, 40)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "Roof", Size = Vector3.new(160, 2, 200), CFrame = CFrame.new(o + Vector3.new(0, 40, 40)), Color = Color3.fromRGB(30, 32, 44), Transparency = 0.2 })
+        -- distance markers
+        for _, z in ipairs({ 20, 40, 60, 80 }) do
+            local m = makePart(geo, { Name = "Marker", Size = Vector3.new(160, 0.15, 1), CFrame = CFrame.new(o + Vector3.new(0, 0.1, z)), Color = Color3.fromRGB(120, 200, 255), Material = Enum.Material.Neon, CanCollide = false })
+            local g = Instance.new("SurfaceGui")
+            g.Face = Enum.NormalId.Top
+            g.Parent = m
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.fromScale(1, 1)
+            l.BackgroundTransparency = 1
+            l.Text = z .. " studs"
+            l.TextColor3 = Color3.fromRGB(120, 200, 255)
+            l.TextScaled = true
+            l.Font = Enum.Font.GothamBold
+            l.Parent = g
+        end
+        -- sign on the back wall
+        local sign = Instance.new("SurfaceGui")
+        sign.Face = Enum.NormalId.Front
+        sign.Parent = back
+        local st = Instance.new("TextLabel")
+        st.Size = UDim2.fromScale(1, 1)
+        st.BackgroundTransparency = 1
+        st.Text = "PRACTICE RANGE"
+        st.TextColor3 = Color3.fromRGB(255, 200, 60)
+        st.TextScaled = true
+        st.Font = Enum.Font.GothamBlack
+        st.Parent = sign
+        return geo
+    end
+
+    -- a dummy built from parts; the torso is anchored and the other parts are welded to it
+    local function makeBot(folder, cf)
+        local model = Instance.new("Model")
+        model.Name = "PracticeBot"
+        local torso = makePart(model, { Name = "Torso", Size = Vector3.new(2, 2, 1), CFrame = cf, Color = Color3.fromRGB(200, 60, 60) })
+        model.PrimaryPart = torso
+        local function attach(name, size, offset, color, shape)
+            local p = makePart(model, { Name = name, Size = size, CFrame = cf * CFrame.new(offset), Color = color, Anchored = false, Shape = shape or Enum.PartType.Block })
+            local w = Instance.new("WeldConstraint")
+            w.Part0 = torso
+            w.Part1 = p
+            w.Parent = p
+            return p
+        end
+        attach("Head", Vector3.new(1.6, 1.6, 1.6), Vector3.new(0, 1.8, 0), Color3.fromRGB(245, 205, 170), Enum.PartType.Ball)
+        attach("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 0, 0), Color3.fromRGB(200, 60, 60))
+        attach("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 0, 0), Color3.fromRGB(200, 60, 60))
+        attach("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, -2, 0), Color3.fromRGB(40, 40, 60))
+        attach("RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, -2, 0), Color3.fromRGB(40, 40, 60))
+        model.Parent = folder
+        return model
+    end
+
+    -- the knife model: a copy of your Knife tool's handle when you have one, otherwise a plain blade
+    local function makeKnifeVisual()
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        local tool = (backpack and backpack:FindFirstChild("Knife"))
+            or (player.Character and player.Character:FindFirstChild("Knife"))
+        local handle = tool and tool:FindFirstChild("Handle")
+        local visual
+        if handle and handle:IsA("BasePart") then
+            visual = handle:Clone()
+            for _, d in ipairs(visual:GetDescendants()) do
+                if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") or d:IsA("BillboardGui")
+                    or d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Motor6D") then
+                    d:Destroy()
+                end
+            end
+            visual.Anchored = true
+            visual.CanCollide = false
+        else
+            visual = makePart(nil, { Name = "Knife", Size = Vector3.new(0.3, 0.3, 2.2), Color = Color3.fromRGB(200, 200, 215), CanCollide = false })
+        end
+        return visual
+    end
+
+    local function startPracticeKnife()
+        local running = true
+        local cam = workspace.CurrentCamera
+
+        -- move your character to the range (only your client sees the range)
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local savedCF = hrp and hrp.CFrame
+
+        -- a local-only copy of your knife in the backpack (named PracticeBlade, so the murderer
+        -- checks that look for "knife" ignore it). It has no scripts, so it never throws by itself.
+        -- Its animations and sounds are copied from your real Knife, so the throw looks and sounds the same.
+        local practiceTool = nil
+        local practiceAnims, practiceSounds = {}, {}
+        do
+            local backpack = player:FindFirstChildOfClass("Backpack")
+            local clone = getgenv().MM2HubKnifeClone
+            local handle = clone and clone:FindFirstChild("Handle")
+            -- the real knife may be in the backpack or held, so check both
+            local realKnife = (backpack and backpack:FindFirstChild("Knife"))
+                or (char and char:FindFirstChild("Knife"))
+            if backpack and handle and handle:IsA("BasePart") then
+                practiceTool = Instance.new("Tool")
+                practiceTool.Name = "PracticeBlade"
+                practiceTool.RequiresHandle = true
+                practiceTool.CanBeDropped = false
+                local h = handle:Clone()
+                for _, d in ipairs(h:GetDescendants()) do
+                    if d:IsA("Script") or d:IsA("LocalScript") or d:IsA("Sound") or d:IsA("BillboardGui")
+                        or d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Motor6D") or d:IsA("TouchTransmitter") then
+                        d:Destroy()
+                    end
+                end
+                h.Name = "Handle"
+                h.Anchored = false
+                h.CanCollide = false
+                h.Massless = true
+                h.Parent = practiceTool
+                practiceTool.Parent = backpack
+            end
+            if realKnife then
+                -- animations live inside the real knife's client script
+                local kc = realKnife:FindFirstChild("KnifeClient")
+                if kc then
+                    for _, a in ipairs(kc:GetDescendants()) do
+                        if a:IsA("Animation") then practiceAnims[a.Name] = a:Clone() end
+                    end
+                end
+                -- Throw sound lives in the Sounds folder, Kill sound in the Handle
+                local sf = realKnife:FindFirstChild("Sounds")
+                local throwSnd = sf and sf:FindFirstChild("Throw")
+                if throwSnd and throwSnd:IsA("Sound") then practiceSounds.Throw = throwSnd:Clone() end
+                local killSnd = realKnife:FindFirstChild("Handle") and realKnife.Handle:FindFirstChild("Kill")
+                if killSnd and killSnd:IsA("Sound") then practiceSounds.Kill = killSnd:Clone() end
+            end
+        end
+
+        local function playPracticeSound(name, parent)
+            local src = practiceSounds[name]
+            if not src then return end
+            local snd = src:Clone()
+            snd.Parent = parent
+            snd:Play()
+            task.delay(3, function()
+                if snd.Parent then snd:Destroy() end
+            end)
+        end
+
+        -- load the copied animations on your own character, so they play like the real knife's
+        local practiceTracks = {}
+        do
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local animator = hum and hum:FindFirstChildOfClass("Animator")
+            if animator then
+                for name, anim in pairs(practiceAnims) do
+                    practiceTracks[name] = animator:LoadAnimation(anim)
+                end
+            end
+        end
+
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "MM2Hub_KnifeRange"
+        gui.ResetOnSpawn = false
+        gui.DisplayOrder = 60
+        gui.Parent = playerGui
+
+        local rangeFolder = Instance.new("Folder")
+        rangeFolder.Name = "MM2Hub_KnifeRange"
+        rangeFolder.Parent = workspace
+        local geo = buildRange(rangeFolder)
+        local botsFolder = Instance.new("Folder")
+        botsFolder.Name = "Bots"
+        botsFolder.Parent = rangeFolder
+
+        local bots = {}
+        local layout = { { -20, 30 }, { 0, 30 }, { 20, 30 }, { -10, 55 }, { 10, 55 }, { 0, 75 } }
+        for _, p in ipairs(layout) do
+            local cf = CFrame.new(RANGE_CENTER + Vector3.new(p[1], 3, p[2]))
+            local model = makeBot(botsFolder, cf)
+            bots[model] = { model = model, cf = cf, state = "up", t = 0, respawnAt = 0 }
+        end
+
+        local botParams = RaycastParams.new()
+        botParams.FilterType = Enum.RaycastFilterType.Include
+        botParams.FilterDescendantsInstances = { botsFolder }
+        local geoParams = RaycastParams.new()
+        geoParams.FilterType = Enum.RaycastFilterType.Include
+        geoParams.FilterDescendantsInstances = { geo }
+
+        -- on-screen text in the game's style
+        local stats = { kills = 0, heads = 0 }
+        local statLabel = Instance.new("TextLabel")
+        statLabel.Size = UDim2.new(0, 360, 0, 28)
+        statLabel.Position = UDim2.new(0.5, -180, 0, 60)
+        statLabel.BackgroundTransparency = 1
+        statLabel.TextColor3 = Color3.fromRGB(230, 230, 240)
+        statLabel.TextStrokeTransparency = 0.5
+        statLabel.TextScaled = true
+        statLabel.Font = Enum.Font.GothamBold
+        statLabel.Text = "PRACTICE KNIFE THROW  |  kills 0  headshots 0"
+        statLabel.Parent = gui
+
+        local banner = Instance.new("TextLabel")
+        banner.Size = UDim2.new(0, 520, 0, 90)
+        banner.Position = UDim2.new(0.5, -260, 0.35, 0)
+        banner.BackgroundTransparency = 1
+        banner.TextScaled = true
+        banner.Font = Enum.Font.GothamBlack
+        banner.TextTransparency = 1
+        banner.Text = ""
+        banner.Parent = gui
+        local bannerStroke = Instance.new("UIStroke")
+        bannerStroke.Thickness = 3
+        bannerStroke.Color = Color3.new(0, 0, 0)
+        bannerStroke.Parent = banner
+        local bannerToken = 0
+
+        local function showBanner(text, color)
+            bannerToken = bannerToken + 1
+            local token = bannerToken
+            banner.Text = text
+            banner.TextColor3 = color
+            banner.TextTransparency = 0
+            banner.Size = UDim2.new(0, 640, 0, 110)
+            TweenService:Create(banner, TweenInfo.new(0.15), { Size = UDim2.new(0, 520, 0, 90) }):Play()
+            task.delay(1.2, function()
+                if token == bannerToken and running then
+                    TweenService:Create(banner, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+                end
+            end)
+        end
+
+        local function updateStats()
+            statLabel.Text = "PRACTICE KNIFE THROW  |  kills " .. stats.kills .. "  headshots " .. stats.heads
+        end
+
+        local function hitBot(inst)
+            local model = inst:FindFirstAncestorOfClass("Model")
+            local bot = model and bots[model]
+            if not bot or bot.state ~= "up" then return end
+            local head = inst.Name == "Head"
+            stats.kills = stats.kills + 1
+            if head then stats.heads = stats.heads + 1 end
+            updateStats()
+            if head then
+                showBanner("HEADSHOT", Color3.fromRGB(255, 70, 90))
+            else
+                showBanner("Throwing Kill!", COLOR_GOLD)
+            end
+            playPracticeSound("Kill", rangeFolder)
+            bot.state = "falling"
+            bot.t = 0
+        end
+
+        local projectiles = {}
+        local lastThrow = 0
+
+        local function stick(pr, pos)
+            pr.part.CFrame = CFrame.lookAt(pos, pos + pr.vel)
+            pr.part.Anchored = true
+            local part = pr.part
+            task.delay(STICK_TIME, function()
+                if part.Parent then part:Destroy() end
+            end)
+        end
+
+        local function throwKnife()
+            if not running then return end
+            if os.clock() - lastThrow < THROW_COOLDOWN then return end
+            lastThrow = os.clock()
+            local look = cam.CFrame.LookVector
+            local origin = cam.CFrame.Position + look * 2
+            local visual = makeKnifeVisual()
+            visual.Parent = rangeFolder
+            visual.CFrame = CFrame.lookAt(origin, origin + look)
+            playPracticeSound("Throw", visual)
+            if practiceTracks.ThrowKnife then practiceTracks.ThrowKnife:Play(0.1, 6, 1) end
+            table.insert(projectiles, { part = visual, pos = origin, origin = origin, vel = look * THROW_SPEED })
+        end
+
+        local heartbeat = RunService.Heartbeat:Connect(function(dt)
+            if not running then return end
+
+            -- knife flight, local raycasts only
+            for i = #projectiles, 1, -1 do
+                local pr = projectiles[i]
+                pr.vel = pr.vel - Vector3.new(0, GRAVITY, 0) * dt
+                local prev = pr.pos
+                local nxt = prev + pr.vel * dt
+                local delta = nxt - prev
+                local hitB = workspace:Raycast(prev, delta, botParams)
+                local hitG = (not hitB) and workspace:Raycast(prev, delta, geoParams)
+                if hitB then
+                    hitBot(hitB.Instance)
+                    stick(pr, hitB.Position)
+                    table.remove(projectiles, i)
+                elseif hitG then
+                    stick(pr, hitG.Position)
+                    table.remove(projectiles, i)
+                elseif (nxt - pr.origin).Magnitude > 600 then
+                    pr.part:Destroy()
+                    table.remove(projectiles, i)
+                else
+                    pr.pos = nxt
+                    pr.part.CFrame = CFrame.lookAt(nxt, nxt + pr.vel)
+                end
+            end
+
+            -- bots: fall, stay down, then stand back up
+            local now = os.clock()
+            for _, bot in pairs(bots) do
+                if bot.state == "falling" then
+                    bot.t = math.min(1, bot.t + dt / FALL_TIME)
+                    bot.model:PivotTo(bot.cf * CFrame.Angles(-math.rad(90) * bot.t, 0, 0))
+                    if bot.t >= 1 then
+                        bot.state = "down"
+                        bot.respawnAt = now + BOT_RESPAWN
+                    end
+                elseif bot.state == "down" and now >= bot.respawnAt then
+                    bot.state = "up"
+                    bot.model:PivotTo(bot.cf)
+                end
+            end
+        end)
+
+        -- same flow as the real knife: a quick right-click tap (or a tap) starts the charge,
+        -- the knife throws when the charge finishes, then the cooldown applies
+        local charging = false
+        local pressStart = 0
+        local function startCharge()
+            if not running or charging then return end
+            local left = THROW_COOLDOWN - (os.clock() - lastThrow)
+            if left > 0 then
+                setStatus(string.format("Knife recharging: %.1fs", left), COLOR_TEXT)
+                return
+            end
+            charging = true
+            setStatus("Charging...", COLOR_GOLD)
+            if practiceTracks.ThrowCharge then
+                practiceTracks.ThrowCharge:Play(0.1, 2.5, 1 / THROW_CHARGE)
+            end
+            task.delay(THROW_CHARGE, function()
+                if charging and running then
+                    charging = false
+                    if practiceTracks.ThrowCharge then practiceTracks.ThrowCharge:Stop() end
+                    throwKnife()
+                end
+            end)
+        end
+
+        -- right-click is read without the game-processed check, like the real knife does
+        local input = UserInputService.InputBegan:Connect(function(io, gp)
+            if not running then return end
+            if io.UserInputType == Enum.UserInputType.MouseButton2 then
+                pressStart = os.clock()
+            elseif io.UserInputType == Enum.UserInputType.Touch and not gp then
+                startCharge()
+            end
+        end)
+        local inputEnded = UserInputService.InputEnded:Connect(function(io)
+            if not running then return end
+            if io.UserInputType == Enum.UserInputType.MouseButton2 and os.clock() - pressStart <= 0.3 then
+                startCharge()
+            end
+        end)
+
+        -- stand on the throw line, facing the bots
+        if hrp then
+            hrp.CFrame = CFrame.lookAt(RANGE_CENTER + Vector3.new(0, 3, -10), RANGE_CENTER + Vector3.new(0, 3, 30))
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
+        setStatus("Practice knife throw: right-click tap to charge and throw", COLOR_GOLD)
+
+        return function()
+            running = false
+            heartbeat:Disconnect()
+            input:Disconnect()
+            inputEnded:Disconnect()
+            charging = false
+            for _, t in pairs(practiceTracks) do pcall(function() t:Stop() end) end
+            if practiceTool then pcall(function() practiceTool:Destroy() end) end
+            for _, pr in ipairs(projectiles) do
+                if pr.part.Parent then pr.part:Destroy() end
+            end
+            projectiles = {}
+            rangeFolder:Destroy()
+            gui:Destroy()
+            local c = player.Character
+            local r = c and c:FindFirstChild("HumanoidRootPart")
+            if r and savedCF then
+                r.CFrame = savedCF
+                r.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+    end
+
+    GAMES.KNIFE = startPracticeKnife
+end
+
+-- PRACTICE SHERIFF: a private gun range far above the map. Bots, shots and tracers are local
+-- only. Nothing is sent to the server, so other players are never affected.
+do
+    local RANGE_CENTER = Vector3.new(0, 4000, 0)
+    local SHOT_COOLDOWN = 0.4
+    local SHOT_RANGE = 600
+    local BOT_RESPAWN = 2
+    local FALL_TIME = 0.3
+    local TRACER_TIME = 0.12
+
+    local function makePart(parent, props)
+        local p = Instance.new("Part")
+        p.Anchored = true
+        p.CanCollide = true
+        p.TopSurface = Enum.SurfaceType.Smooth
+        p.BottomSurface = Enum.SurfaceType.Smooth
+        p.Material = Enum.Material.SmoothPlastic
+        for k, v in pairs(props) do p[k] = v end
+        p.Parent = parent
+        return p
+    end
+
+    local function buildRange(rangeFolder)
+        local geo = Instance.new("Folder")
+        geo.Name = "Geometry"
+        geo.Parent = rangeFolder
+        local o = RANGE_CENTER
+        makePart(geo, { Name = "Floor", Size = Vector3.new(160, 2, 200), CFrame = CFrame.new(o + Vector3.new(0, -1, 40)), Color = Color3.fromRGB(70, 75, 90) })
+        makePart(geo, { Name = "Lane", Size = Vector3.new(6, 0.1, 200), CFrame = CFrame.new(o + Vector3.new(0, 0.05, 40)), Color = Color3.fromRGB(255, 200, 60), Material = Enum.Material.Neon, CanCollide = false })
+        local back = makePart(geo, { Name = "BackWall", Size = Vector3.new(160, 40, 2), CFrame = CFrame.new(o + Vector3.new(0, 20, 141)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "LeftWall", Size = Vector3.new(2, 40, 200), CFrame = CFrame.new(o + Vector3.new(-80, 20, 40)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "RightWall", Size = Vector3.new(2, 40, 200), CFrame = CFrame.new(o + Vector3.new(80, 20, 40)), Color = Color3.fromRGB(40, 44, 58) })
+        makePart(geo, { Name = "Roof", Size = Vector3.new(160, 2, 200), CFrame = CFrame.new(o + Vector3.new(0, 40, 40)), Color = Color3.fromRGB(30, 32, 44), Transparency = 0.2 })
+        for _, z in ipairs({ 20, 40, 60, 80 }) do
+            local m = makePart(geo, { Name = "Marker", Size = Vector3.new(160, 0.15, 1), CFrame = CFrame.new(o + Vector3.new(0, 0.1, z)), Color = Color3.fromRGB(120, 200, 255), Material = Enum.Material.Neon, CanCollide = false })
+            local g = Instance.new("SurfaceGui")
+            g.Face = Enum.NormalId.Top
+            g.Parent = m
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.fromScale(1, 1)
+            l.BackgroundTransparency = 1
+            l.Text = z .. " studs"
+            l.TextColor3 = Color3.fromRGB(120, 200, 255)
+            l.TextScaled = true
+            l.Font = Enum.Font.GothamBold
+            l.Parent = g
+        end
+        local sign = Instance.new("SurfaceGui")
+        sign.Face = Enum.NormalId.Front
+        sign.Parent = back
+        local st = Instance.new("TextLabel")
+        st.Size = UDim2.fromScale(1, 1)
+        st.BackgroundTransparency = 1
+        st.Text = "PRACTICE SHERIFF"
+        st.TextColor3 = Color3.fromRGB(120, 180, 255)
+        st.TextScaled = true
+        st.Font = Enum.Font.GothamBlack
+        st.Parent = sign
+        return geo
+    end
+
+    local function makeBot(folder, cf)
+        local model = Instance.new("Model")
+        model.Name = "PracticeBot"
+        local torso = makePart(model, { Name = "Torso", Size = Vector3.new(2, 2, 1), CFrame = cf, Color = Color3.fromRGB(200, 60, 60) })
+        model.PrimaryPart = torso
+        local function attach(name, size, offset, color, shape)
+            local p = makePart(model, { Name = name, Size = size, CFrame = cf * CFrame.new(offset), Color = color, Anchored = false, Shape = shape or Enum.PartType.Block })
+            local w = Instance.new("WeldConstraint")
+            w.Part0 = torso
+            w.Part1 = p
+            w.Parent = p
+        end
+        attach("Head", Vector3.new(1.6, 1.6, 1.6), Vector3.new(0, 1.8, 0), Color3.fromRGB(245, 205, 170), Enum.PartType.Ball)
+        attach("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 0, 0), Color3.fromRGB(200, 60, 60))
+        attach("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 0, 0), Color3.fromRGB(200, 60, 60))
+        attach("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, -2, 0), Color3.fromRGB(40, 40, 60))
+        attach("RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, -2, 0), Color3.fromRGB(40, 40, 60))
+        model.Parent = folder
+        return model
+    end
+
+    local function startPracticeSheriff()
+        local running = true
+        local cam = workspace.CurrentCamera
+
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local savedCF = hrp and hrp.CFrame
+
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "MM2Hub_SheriffRange"
+        gui.ResetOnSpawn = false
+        gui.DisplayOrder = 60
+        gui.Parent = playerGui
+
+        local rangeFolder = Instance.new("Folder")
+        rangeFolder.Name = "MM2Hub_SheriffRange"
+        rangeFolder.Parent = workspace
+        local geo = buildRange(rangeFolder)
+        local botsFolder = Instance.new("Folder")
+        botsFolder.Name = "Bots"
+        botsFolder.Parent = rangeFolder
+
+        local bots = {}
+        local layout = { { -20, 30 }, { 0, 30 }, { 20, 30 }, { -10, 55 }, { 10, 55 }, { 0, 75 } }
+        for _, p in ipairs(layout) do
+            local cf = CFrame.new(RANGE_CENTER + Vector3.new(p[1], 3, p[2]))
+            local model = makeBot(botsFolder, cf)
+            bots[model] = { model = model, cf = cf, state = "up", t = 0, respawnAt = 0 }
+        end
+
+        local botParams = RaycastParams.new()
+        botParams.FilterType = Enum.RaycastFilterType.Include
+        botParams.FilterDescendantsInstances = { botsFolder }
+        local geoParams = RaycastParams.new()
+        geoParams.FilterType = Enum.RaycastFilterType.Include
+        geoParams.FilterDescendantsInstances = { geo }
+
+        local stats = { kills = 0, heads = 0, shots = 0 }
+        local statLabel = Instance.new("TextLabel")
+        statLabel.Size = UDim2.new(0, 400, 0, 28)
+        statLabel.Position = UDim2.new(0.5, -200, 0, 60)
+        statLabel.BackgroundTransparency = 1
+        statLabel.TextColor3 = Color3.fromRGB(230, 230, 240)
+        statLabel.TextStrokeTransparency = 0.5
+        statLabel.TextScaled = true
+        statLabel.Font = Enum.Font.GothamBold
+        statLabel.Parent = gui
+        local function updateStats()
+            statLabel.Text = "PRACTICE SHERIFF  |  kills " .. stats.kills .. "  headshots " .. stats.heads .. "  shots " .. stats.shots
+        end
+        updateStats()
+
+        local banner = Instance.new("TextLabel")
+        banner.Size = UDim2.new(0, 520, 0, 90)
+        banner.Position = UDim2.new(0.5, -260, 0.35, 0)
+        banner.BackgroundTransparency = 1
+        banner.TextScaled = true
+        banner.Font = Enum.Font.GothamBlack
+        banner.TextTransparency = 1
+        banner.Text = ""
+        banner.Parent = gui
+        local bannerStroke = Instance.new("UIStroke")
+        bannerStroke.Thickness = 3
+        bannerStroke.Color = Color3.new(0, 0, 0)
+        bannerStroke.Parent = banner
+        local bannerToken = 0
+
+        local function showBanner(text, color)
+            bannerToken = bannerToken + 1
+            local token = bannerToken
+            banner.Text = text
+            banner.TextColor3 = color
+            banner.TextTransparency = 0
+            banner.Size = UDim2.new(0, 640, 0, 110)
+            TweenService:Create(banner, TweenInfo.new(0.15), { Size = UDim2.new(0, 520, 0, 90) }):Play()
+            task.delay(1.2, function()
+                if token == bannerToken and running then
+                    TweenService:Create(banner, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+                end
+            end)
+        end
+
+        local function hitBot(inst)
+            local model = inst:FindFirstAncestorOfClass("Model")
+            local bot = model and bots[model]
+            if not bot or bot.state ~= "up" then return end
+            local head = inst.Name == "Head"
+            stats.kills = stats.kills + 1
+            if head then stats.heads = stats.heads + 1 end
+            updateStats()
+            if head then
+                showBanner("HEADSHOT", Color3.fromRGB(255, 70, 90))
+            else
+                showBanner("Shot Kill", COLOR_GOLD)
+            end
+            bot.state = "falling"
+            bot.t = 0
+        end
+
+        -- a short local beam from the muzzle to where the shot landed
+        local function drawTracer(from, to)
+            local len = (to - from).Magnitude
+            if len < 0.1 then return end
+            local beam = makePart(rangeFolder, { Name = "Tracer", Size = Vector3.new(0.15, 0.15, len), CFrame = CFrame.lookAt(from, to) * CFrame.new(0, 0, -len / 2),
+                Color = Color3.fromRGB(255, 240, 180), Material = Enum.Material.Neon, CanCollide = false, CanQuery = false })
+            task.delay(TRACER_TIME, function()
+                if beam.Parent then beam:Destroy() end
+            end)
+        end
+
+        local lastShot = 0
+        local function fire()
+            if not running then return end
+            if os.clock() - lastShot < SHOT_COOLDOWN then return end
+            lastShot = os.clock()
+            stats.shots = stats.shots + 1
+            local look = cam.CFrame.LookVector
+            local origin = cam.CFrame.Position + look * 2
+            local hitB = workspace:Raycast(origin, look * SHOT_RANGE, botParams)
+            local hitG = (not hitB) and workspace:Raycast(origin, look * SHOT_RANGE, geoParams)
+            local endPos = origin + look * SHOT_RANGE
+            if hitB then
+                endPos = hitB.Position
+                hitBot(hitB.Instance)
+            elseif hitG then
+                endPos = hitG.Position
+            end
+            drawTracer(origin, endPos)
+            updateStats()
+        end
+
+        local heartbeat = RunService.Heartbeat:Connect(function(dt)
+            if not running then return end
+            local now = os.clock()
+            for _, bot in pairs(bots) do
+                if bot.state == "falling" then
+                    bot.t = math.min(1, bot.t + dt / FALL_TIME)
+                    bot.model:PivotTo(bot.cf * CFrame.Angles(-math.rad(90) * bot.t, 0, 0))
+                    if bot.t >= 1 then
+                        bot.state = "down"
+                        bot.respawnAt = now + BOT_RESPAWN
+                    end
+                elseif bot.state == "down" and now >= bot.respawnAt then
+                    bot.state = "up"
+                    bot.model:PivotTo(bot.cf)
+                end
+            end
+        end)
+
+        local input = UserInputService.InputBegan:Connect(function(io, gp)
+            if gp or not running then return end
+            if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+                fire()
+            end
+        end)
+
+        if hrp then
+            hrp.CFrame = CFrame.lookAt(RANGE_CENTER + Vector3.new(0, 3, -10), RANGE_CENTER + Vector3.new(0, 3, 30))
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
+        setStatus("Practice sheriff: click or tap to shoot", COLOR_BLUE)
+
+        return function()
+            running = false
+            heartbeat:Disconnect()
+            input:Disconnect()
+            rangeFolder:Destroy()
+            gui:Destroy()
+            local c = player.Character
+            local r = c and c:FindFirstChild("HumanoidRootPart")
+            if r and savedCF then
+                r.CFrame = savedCF
+                r.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+    end
+
+    GAMES.SHERIFF = startPracticeSheriff
+end
+
 ;(function() -- game menu: a card for each game
     local ENTRIES = {
         { key = "STACK", icon = "🧱", name = "BLOCK STACK", desc = "Drop blocks onto the tower", color = COLOR_GOLD },
@@ -4430,6 +5334,8 @@ end
         { key = "BUBBLE", icon = "🫧", name = "BUBBLE POP", desc = "Pop the bubbles before they escape", color = Color3.fromRGB(90, 200, 255) },
         { key = "MEMORY", icon = "🃏", name = "MEMORY FLIP", desc = "Find all 8 matching pairs", color = Color3.fromRGB(255, 170, 60) },
         { key = "PUZZLE", icon = "🧩", name = "SLIDE PUZZLE", desc = "Slide the tiles back in order", color = Color3.fromRGB(160, 255, 120) },
+        { key = "KNIFE", icon = "🔪", name = "PRACTICE KNIFE", desc = "Throw at bots, only you see it", color = COLOR_RED },
+        { key = "SHERIFF", icon = "🔫", name = "PRACTICE SHERIFF", desc = "Shoot bots, only you see it", color = COLOR_BLUE },
     }
     local CARD_H = 74
 
